@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-08
+
 ## [1.0.2] - 2026-11-08
 
 - Built with argsbarg 8.3.0, so the bundle can join an `argsbarg gateway` (one process for several plugins).

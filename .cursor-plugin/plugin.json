@@ -2,7 +2,7 @@
   "name": "brave-history",
   "displayName": "BraveHistory",
   "description": "Search Brave browser history (titles, URLs, visits) over MCP.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": {
     "name": "Brian Dombrowski"
   },

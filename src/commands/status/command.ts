@@ -27,10 +27,11 @@ export const statusCommand = command({
   outputSchema: StatusJsonOutput,
   handler: (ctx) => {
     const out: StatusJsonOutput = { version: ctx.spec.version };
-    if (ctx.hasFlag("json")) {
-      console.log(JSON.stringify(out, null, 2));
-    } else {
+    if (ctx.invocation === "cli" && !ctx.hasFlag("json")) {
       console.log(`version=${out.version}`);
+      return;
     }
+    // Returned, not printed, so MCP and --json get a structured result.
+    return out;
   },
 });
