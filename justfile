@@ -9,7 +9,7 @@ _:
 
 # Rebuild the committed Node bundle that plugins run (commit dist/brave-history.mjs)
 build:
-    esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --minify-whitespace --minify-syntax --outfile=dist/brave-history.mjs
+    esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --minify-whitespace --minify-syntax --outfile=dist/brave-history.mjs
 
 # Install the Claude Code plugin from this checkout (restart Claude Code afterwards)
 plugin-claude-install: build

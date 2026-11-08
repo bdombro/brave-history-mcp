@@ -1,71 +1,59 @@
 # brave-history
 
-Search Brave browser history (titles, URLs, visits) over MCP. (Zod schemas, typed commands, in-repo manifests).
+Search Brave browser history (titles, URLs, visits) over MCP. Read-only.
 
-## Overview
+A Claude Code / Cursor plugin that runs a small MCP server (`node dist/brave-history.mjs mcp`). It reads Brave's Chromium `History` SQLite DB for every profile (`Default`, `Profile N`) on macOS.
 
-`brave-history` packages an MCP server and agent skills directly for Cursor and Claude Code marketplaces:
+## How it reads history
 
-- **Cursor Plugin**: inline MCP configuration in `.cursor-plugin/plugin.json` runs `node ${CURSOR_PLUGIN_ROOT}/dist/brave-history.mjs mcp`.
-- **Claude Code Plugin**: inline MCP configuration in `.claude-plugin/plugin.json` runs `node ${CLAUDE_PLUGIN_ROOT}/dist/brave-history.mjs mcp`.
-- **In-repo skills**: `skills/brave-history/SKILL.md` discovered and loaded by agent platforms.
-- **Committed Node bundle**: `dist/brave-history.mjs` is self-contained (dependencies and schemas bundled), so a fresh clone runs with no install step.
+- Brave locks `History` while running, so the server never opens it. When the original (or its `-wal` / `-journal` sidecar) is newer than the cached copy, it copies them to `~/.local/share/brave-history/<profile>/`. It queries that copy read-only with `node:sqlite`.
+- Brave's own files are never written. There is no index of its own and no background watcher; the copy refreshes when a command runs.
+- Times are returned as ISO 8601 in Europe/Dublin local time with an offset (e.g. `2026-07-01T13:00:00+01:00`). Date filters (`--from`, `--to`) are inclusive local days.
+- macOS: the host app (terminal, Claude Code, Cursor) needs permission to read `~/Library/Application Support/BraveSoftware/` (Full Disk Access or the app-data prompt).
 
 ## Installation
 
-Requires Node >=20 on the host's PATH. Nothing is installed at startup; stdout contains only MCP messages. Maintainers develop, test, and bundle (esbuild) with Node ≥ 22.18, npm, and [just](https://just.systems); no Bun required.
-
-The in-repo example retains its `argsbarg: file:../..` development dependency. Before distributing a standalone copy, resolve that dependency for the destination repository and regenerate its lockfile; the parent-checkout path is not portable.
-
-### Cursor
-
-Recommended: import directly from GitHub — Cursor Dashboard → **Settings → Plugins → Team Marketplaces → Import**, then enter `https://github.com/bdombro/brave-history` (subdirectory `examples/agent-plugin` once copied to its own repo). Once published to the [official marketplace](https://cursor.com/marketplace/publish), install via `/add-plugin brave-history` or the Customize sidebar.
+Requires Node >= 22.5 (for `node:sqlite`) on the host's PATH. Nothing is installed at startup.
 
 ### Claude Code
 
-Recommended: add the GitHub repo as a marketplace, then install:
-
 ```bash
-/plugin marketplace add <owner>/<repo>
+/plugin marketplace add bdombro/brave-history
 /plugin install brave-history@brave-history
 ```
 
-The marketplace name comes from `.claude-plugin/marketplace.json`, not the repository name.
+### Cursor
 
-Once merged into [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official), install via `/plugin install brave-history@claude-plugins-official`.
+Cursor Dashboard → **Settings → Plugins → Team Marketplaces → Import**, then enter `https://github.com/bdombro/brave-history`. For a local checkout: `just plugin-cursor-upsert`.
 
 ## Commands
 
-- `brave-history echo` — Echo text back to stdout or inspect flags.
-- `brave-history render-json` — Process structured JSON payloads with schema validation.
-- `brave-history status` — Show application version with a Zod output schema (`--json`).
-- `brave-history workspaces` — Manage workspace resources (REST CRUD with in-memory SQLite).
+Each command is also an MCP tool with the same arguments. Run `brave-history <command> --help` for details. Add `--json` on the CLI for JSON output.
 
-### Built-in commands
+- `brave-history search <words...> [--domain D] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--profile P] [--limit N]`: keyword search over page titles and URLs. Every word must match (case-insensitive substring). Returns title, URL, last visit, visit count and profile, newest first.
+- `brave-history list [--domain D] [--from] [--to] [--profile] [--limit]`: recent pages, newest first.
+- `brave-history visits <url> [--prefix] [--from] [--to] [--profile] [--limit]`: every visit to one URL, or to every URL under a prefix, with time, transition type (`link`, `typed`, `reload`, …) and duration.
+- `brave-history status`: show the version.
 
-- `brave-history completion` — Print shell tab-completion scripts (bash, zsh, fish).
-- `brave-history mcp` — Start the Model Context Protocol (stdio) server for AI coding agents.
-- `brave-history version` — Display version information.
+`--domain amazon.com` matches `amazon.com` and its subdomains (`www.amazon.com`), not `notamazon.com`. `--limit` defaults to 25 (max 500).
 
-## Contributing / Local Development
+Built-ins: `completion`, `mcp`, `version`.
+
+### Environment overrides
+
+| Variable | Default |
+| --- | --- |
+| `BRAVE_HISTORY_ROOT` | `~/Library/Application Support/BraveSoftware/Brave-Browser` |
+| `BRAVE_HISTORY_CACHE` | `~/.local/share/brave-history` |
+| `BRAVE_HISTORY_TZ` | `Europe/Dublin` |
+
+## Development
 
 ```bash
-git clone https://github.com/bdombro/brave-history.git
-cd bun-argsbarg/examples/agent-plugin
-
 just setup
-just test
-
-# Rebuild the committed Node bundle and run the MCP server from it
-just build
-node dist/brave-history.mjs mcp
-
-# Link into local Cursor plugins for live testing
-just plugin-cursor-upsert
-
-# Register this checkout as a marketplace and install in Claude Code
-just plugin-claude-install
+just test            # Biome + tsc + node:test (fixture History DBs in a temp dir)
+just run search foo  # from source
+just build           # rebuild the committed dist/brave-history.mjs
 ```
 
-Restart Claude Code after installing. Use `node src/index.ts <command>` for CLI commands from source. Commit `dist/brave-history.mjs` whenever source changes (`just build`). Release with `just release <major|minor|patch>` (no prompt; commits all changes, tags, pushes and creates the GitHub release).
-
+Commit `dist/brave-history.mjs` with source changes. Release with `just release <major|minor|patch>`.

@@ -1,46 +1,23 @@
 ---
 id: brave-history
 name: brave-history
-description: Operates the brave-history CLI (echo, render-json, status, workspaces :id delete, workspaces :id get, and 4 more). Use when the user mentions brave-history, echo, render-json, status, or related tasks.
+description: Searches Brian's Brave browser history (search, list, visits). Use when recalling a site, product, article, doc or video he looked at, when he visited a page, or what he browsed on a domain or day.
 enabled: true
 ---
 
 # brave-history
 
-Search Brave browser history (titles, URLs, visits) over MCP. (Zod schemas, typed commands, REST CRUD)
+Read-only access to Brave browser history (all profiles). Prefer the MCP tools (`search`, `list`, `visits`); the CLI is `brave-history <command>` with the same arguments.
 
-## Execution
+## Which tool
 
-Invoke via shell:
+- **`search`**: you have keywords ("that standing desk on Amazon"). `words` are ANDed over title and URL, so use 1-3 distinctive words; add `domain`, `from` / `to` (YYYY-MM-DD, inclusive) to narrow it.
+- **`list`**: no keywords, just "what did I look at on youtube.com last week" or "pages from yesterday".
+- **`visits`**: you already have a URL and need when or how often it was visited. Set `prefix: true` for a whole section (`https://github.com/bdombro/`).
 
-```bash
-brave-history <subcommand> [options] [args]
-```
+## Tips
 
-## Options & Help Discovery
-
-- Run `brave-history <subcommand> --help` to inspect flags, choices, and positional arguments before running unfamiliar subcommands.
-- Run `brave-history --help` at the root for top-level options and command routing.
-
-## Commands
-
-- **`brave-history echo`** — Echo a message (MCP-friendly command).
-- **`brave-history render-json`** — Echo a JSON message (schema-first JSON command demo).
-- **`brave-history status`** — Show app version.
-- **`brave-history workspaces :id delete`** — Delete a workspace.
-- **`brave-history workspaces :id get`** — Get one workspace.
-- **`brave-history workspaces :id patch`** — Patch a workspace name.
-- **`brave-history workspaces :id put`** — Replace a workspace.
-- **`brave-history workspaces get`** — List workspaces.
-- **`brave-history workspaces post`** — Create a workspace.
-
-## Workflow & Pitfalls
-
-- Always run `brave-history <subcommand> --help` instead of guessing options or reading large doc files.
-- Pass `--` before arguments that look like flags.
-- Pass `--json` when machine-readable structured output is supported.
-
-## Install location
-
-- **Agent plugin:** plugins built with `brave-history mcp bundle` ship this skill.
-- **Manual:** copy or symlink `skills/brave-history/` into your agent's skill directory (for example `~/.agents/skills/brave-history/` or `~/.claude/skills/brave-history/`).
+- Times are Europe/Dublin local ISO with offset. `lastVisit` is the latest visit inside the date range.
+- No hits: drop a word, try a synonym or the site's name, or remove the date range. Titles can be empty, so URLs carry many matches.
+- `profile` takes a directory (`Default`, `Profile 1`) or display name; omit it to search every profile.
+- Results are page rows, not page content. Open the URL with a browser tool if you need the content.

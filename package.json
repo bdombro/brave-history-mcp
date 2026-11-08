@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Search Brave browser history (titles, URLs, visits) over MCP.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",

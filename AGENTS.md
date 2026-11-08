@@ -37,14 +37,14 @@ When adding or changing commands, schemas, or MCP exposure:
 | `src/index.ts` | Entry: `await app.run()` | Command handlers, business logic |
 | `src/app.ts` | App spec: `commands: […]` (alphabetical by key) | Command handlers, business logic |
 | `src/create-identity.ts` | Key, release repo, description (rewritten by `argsbarg create`) | Anything else |
-| `src/types/` | Module augmentations (`argsbarg.d.ts`: `Locals`, `ServerState`) | Runtime logic |
-| `src/db/` | `AppDb` (SQLite connect, migrate, domain access), `migrations/*.sql` | Command handlers |
+| `src/schemas.ts` | Zod fields, CLI options and output schemas shared by the history commands | Queries |
+| `src/db/` | Profile discovery, cached History copy (`snapshot.ts`), read-only queries (`index.ts`), Chromium time (`time.ts`), test fixture (`fixture.ts`) | Command handlers |
 | `src/commands/<name>/` | One command: `command.ts` (with its Zod schemas), colocated `*.test.ts` | Shared helpers (lift them out) |
 | `scripts/` | Dev tooling (release) | Production command paths |
 
 ## Tooling
 
-- Node ≥ 22.18 and npm; no Bun required. [just](https://just.systems) runs the tasks.
+- Node ≥ 22.18 to develop (runtime needs ≥ 22.5 for `node:sqlite`) and npm; no Bun required. [just](https://just.systems) runs the tasks.
 - `just setup`, `just check` (Biome + `tsc --noEmit`), `just test` (check + `node --test`), `just run …` (from source, type-stripped).
 - `just build` rebuilds the committed bundle `dist/brave-history.mjs` (esbuild). Plugins run it with `node` via inline manifest MCP configs; commit it with its source and never hand-edit it. stdout is the MCP protocol.
 - `just plugin-claude-install`, `just plugin-cursor-upsert` install this checkout locally.
@@ -67,4 +67,7 @@ When adding or changing commands, schemas, or MCP exposure:
 
 ## App conventions
 
-Replace with app-specific bullets.
+- Read-only. Never open or write Brave's own files: `ensureCachedHistory` copies `History` (+ `-wal` / `-journal`) into `BRAVE_HISTORY_CACHE` when the original is newer, and queries open that copy with `readOnly: true`.
+- Chromium times are µs since 1601 and exceed `Number.MAX_SAFE_INTEGER`: bind them as `bigint`, read with `setReadBigInts(true)`, and convert to unix ms in SQL.
+- Output times are ISO 8601 in `BRAVE_HISTORY_TZ` (default Europe/Dublin); date filters are inclusive local days.
+- Tests build Chromium-shaped History DBs in a temp dir via `src/db/fixture.ts` (env overrides); never point tests at the real Brave dir.
