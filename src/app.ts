@@ -6,6 +6,7 @@ The version is read from `package.json` at runtime, so the same code runs from
 
 import { readFileSync } from "node:fs";
 import { argsbarg } from "argsbarg";
+import { errors } from "./bugsink.ts";
 import { listCommand } from "./commands/list/command.ts";
 import { searchCommand } from "./commands/search/command.ts";
 import { statusCommand } from "./commands/status/command.ts";
@@ -24,6 +25,7 @@ function packageFile(
 const version = (JSON.parse(packageFile("package.json")) as { version: string }).version;
 
 export const app = argsbarg({
+  errorReporter: errors,
   commands: [listCommand, searchCommand, statusCommand, visitsCommand],
   description: createIdentity.desc,
   key: createIdentity.key,

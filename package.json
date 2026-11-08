@@ -1,6 +1,6 @@
 {
   "name": "brave-history",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "Search Brave browser history (titles, URLs, visits) over MCP.",

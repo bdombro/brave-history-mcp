@@ -49,6 +49,8 @@ Built-ins: `completion`, `mcp`, `version`.
 | `BRAVE_HISTORY_CACHE` | `~/.local/share/brave-history` |
 | `BRAVE_HISTORY_TZ` | `Europe/Dublin` |
 
+Errors go to this plugin's Bugsink project (bugsink.btek.cc); set `BUGSINK_DSN=""` to disable.
+
 ## Development
 
 ```bash
