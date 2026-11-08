@@ -7,6 +7,8 @@ A Claude Code / Cursor plugin that runs a small MCP server (`node dist/brave-his
 ## How it reads history
 
 - Brave locks `History` while running, so the server never opens it. When the original (or its `-wal` / `-journal` sidecar) is newer than the cached copy, it copies them to `~/.local/share/brave-history/<profile>/`. It queries that copy read-only with `node:sqlite`.
+- The cache dir is created `0o700` and the copied History files `0o600` (existing ones are tightened on each run). Copies are staged in a unique `fs.mkdtemp` dir, then moved into place.
+- Returned URLs have the query string and `#fragment` removed (they often hold tokens and ids). Pass `fullUrls: true` (CLI `--fullUrls`) to keep them. Keyword matching still uses the full stored URL.
 - Brave's own files are never written. There is no index of its own and no background watcher; the copy refreshes when a command runs.
 - Times are returned as ISO 8601 in Europe/Dublin local time with an offset (e.g. `2026-07-01T13:00:00+01:00`). Date filters (`--from`, `--to`) are inclusive local days.
 - macOS: the host app (terminal, Claude Code, Cursor) needs permission to read `~/Library/Application Support/BraveSoftware/` (Full Disk Access or the app-data prompt).
@@ -30,9 +32,9 @@ Cursor Dashboard → **Settings → Plugins → Team Marketplaces → Import**, 
 
 Each command is also an MCP tool with the same arguments. Run `brave-history <command> --help` for details. Add `--json` on the CLI for JSON output.
 
-- `brave-history search <words...> [--domain D] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--profile P] [--limit N]`: keyword search over page titles and URLs. Every word must match (case-insensitive substring). Returns title, URL, last visit, visit count and profile, newest first.
-- `brave-history list [--domain D] [--from] [--to] [--profile] [--limit]`: recent pages, newest first.
-- `brave-history visits <url> [--prefix] [--from] [--to] [--profile] [--limit]`: every visit to one URL, or to every URL under a prefix, with time, transition type (`link`, `typed`, `reload`, …) and duration.
+- `brave-history search <words...> [--domain D] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--profile P] [--limit N] [--fullUrls]`: keyword search over page titles and URLs. Every word must match (case-insensitive substring). Returns title, URL, last visit, visit count and profile, newest first.
+- `brave-history list [--domain D] [--from] [--to] [--profile] [--limit] [--fullUrls]`: recent pages, newest first.
+- `brave-history visits <url> [--prefix] [--from] [--to] [--profile] [--limit] [--fullUrls]`: every visit to one URL, or to every URL under a prefix, with time, transition type (`link`, `typed`, `reload`, …) and duration.
 - `brave-history status`: show the version.
 
 `--domain amazon.com` matches `amazon.com` and its subdomains (`www.amazon.com`), not `notamazon.com`. `--limit` defaults to 25 (max 500).

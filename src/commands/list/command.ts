@@ -5,7 +5,7 @@ list — recent pages, optionally limited to one domain and a date range.
 import { command, OptionKind } from "argsbarg";
 import { z } from "zod";
 import { queryPages } from "../../db/index.ts";
-import { FILTER_OPTIONS, filterFields, formatPages, PagesOutput } from "../../schemas.ts";
+import { FILTER_OPTIONS, filterFields, formatPages, PagesOutput, urlClean } from "../../schemas.ts";
 
 /** Input for `list`. */
 export const ListInput = z.strictObject({
@@ -22,7 +22,8 @@ export type ListInput = z.infer<typeof ListInput>;
 /** Lists recently visited pages. */
 export const listCommand = command({
   key: "list",
-  description: "List recently visited pages in Brave, newest first.",
+  description:
+    "List recently visited pages in Brave, newest first. URLs come back without query strings or #fragments unless fullUrls is set.",
   notes: "Example: {argsbarg:program} list --domain youtube.com --from 2026-11-01 --limit 50",
   options: [
     {
@@ -37,7 +38,13 @@ export const listCommand = command({
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
   handler: (ctx) => {
     const { domain, from, to, profile, limit } = ctx.inputs;
-    const out: PagesOutput = { pages: queryPages({ words: [], domain, from, to, profile, limit }) };
+    const full = ctx.inputs.fullUrls;
+    const out: PagesOutput = {
+      pages: queryPages({ words: [], domain, from, to, profile, limit }).map((p) => ({
+        ...p,
+        url: urlClean(p.url, full),
+      })),
+    };
     if (ctx.invocation === "cli") {
       console.log(ctx.hasFlag("json") ? JSON.stringify(out, null, 2) : formatPages(out));
       return;

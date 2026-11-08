@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync, utimesSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, readdirSync, statSync, utimesSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { before, describe, test } from "node:test";
 import { addPage, createFixture, type Fixture, historyPath } from "./fixture.ts";
@@ -83,6 +83,30 @@ describe("cached History copy", () => {
     } finally {
       process.env.BRAVE_HISTORY_CACHE = saved;
     }
+  });
+
+  test("cache dir is 0o700 and the copied files 0o600, including pre-existing loose ones", () => {
+    const dir = join(fixture.cache, "Default");
+    const mode = (p: string) => statSync(p).mode & 0o777;
+    setMtime(source, Date.parse("2026-01-06T10:00:00Z"));
+    ensureCachedHistory({ dir: "Default" });
+    assert.equal(mode(fixture.cache), 0o700);
+    assert.equal(mode(dir), 0o700);
+    assert.equal(mode(join(dir, "History")), 0o600);
+    chmodSync(dir, 0o755);
+    chmodSync(join(dir, "History"), 0o644);
+    ensureCachedHistory({ dir: "Default" }); // up to date: no copy, still tightened
+    assert.equal(mode(dir), 0o700);
+    assert.equal(mode(join(dir, "History")), 0o600);
+  });
+
+  test("staging uses mkdtemp and leaves no temp dirs behind", () => {
+    setMtime(source, Date.parse("2026-01-07T10:00:00Z"));
+    ensureCachedHistory({ dir: "Default" });
+    assert.deepEqual(
+      readdirSync(fixture.cache).filter((n) => n.includes(".tmp-")),
+      [],
+    );
   });
 
   function addToSource(p: ReturnType<typeof page>): void {

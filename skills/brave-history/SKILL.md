@@ -20,4 +20,5 @@ Read-only access to Brave browser history (all profiles). Prefer the MCP tools (
 - Times are Europe/Dublin local ISO with offset. `lastVisit` is the latest visit inside the date range.
 - No hits: drop a word, try a synonym or the site's name, or remove the date range. Titles can be empty, so URLs carry many matches.
 - `profile` takes a directory (`Default`, `Profile 1`) or display name; omit it to search every profile.
+- URLs come back without query strings or #fragments. Set `fullUrls: true` only when you need the exact URL (it may contain tokens).
 - Results are page rows, not page content. Open the URL with a browser tool if you need the content.

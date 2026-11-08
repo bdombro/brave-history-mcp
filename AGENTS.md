@@ -67,7 +67,7 @@ When adding or changing commands, schemas, or MCP exposure:
 
 ## App conventions
 
-- Read-only. Never open or write Brave's own files: `ensureCachedHistory` copies `History` (+ `-wal` / `-journal`) into `BRAVE_HISTORY_CACHE` when the original is newer, and queries open that copy with `readOnly: true`.
+- Read-only. Never open or write Brave's own files: `ensureCachedHistory` copies `History` (+ `-wal` / `-journal`) into `BRAVE_HISTORY_CACHE` when the original is newer, and queries open that copy with `readOnly: true`. The cache dir is `0o700`, files `0o600`, staging via `mkdtemp`; commands strip query/fragment from URLs unless `fullUrls` is set (`urlClean` in `src/schemas.ts`).
 - Chromium times are µs since 1601 and exceed `Number.MAX_SAFE_INTEGER`: bind them as `bigint`, read with `setReadBigInts(true)`, and convert to unix ms in SQL.
 - Output times are ISO 8601 in `BRAVE_HISTORY_TZ` (default Europe/Dublin); date filters are inclusive local days.
 - Tests build Chromium-shaped History DBs in a temp dir via `src/db/fixture.ts` (env overrides); never point tests at the real Brave dir.

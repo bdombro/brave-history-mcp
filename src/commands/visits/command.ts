@@ -5,7 +5,7 @@ visits — every visit to one URL (or every URL under a prefix) with times and t
 import { command, OptionKind } from "argsbarg";
 import { z } from "zod";
 import { queryVisits } from "../../db/index.ts";
-import { FILTER_OPTIONS, filterFields } from "../../schemas.ts";
+import { FILTER_OPTIONS, filterFields, urlClean } from "../../schemas.ts";
 
 /** Input for `visits`. */
 export const VisitsInput = z.strictObject({
@@ -23,7 +23,7 @@ export const VisitsOutput = z.strictObject({
     .array(
       z.strictObject({
         time: z.string().describe("Visit time, ISO 8601 Europe/Dublin local time with offset."),
-        url: z.string().describe("Visited URL."),
+        url: z.string().describe("Visited URL (query string and #fragment removed unless fullUrls is set)."),
         title: z.string().describe("Page title (may be empty)."),
         transition: z
           .string()
@@ -43,7 +43,8 @@ export type VisitsOutput = z.infer<typeof VisitsOutput>;
 /** Lists every visit to a URL or URL prefix. */
 export const visitsCommand = command({
   key: "visits",
-  description: "List every Brave visit to a URL (or URL prefix) with times and transition types.",
+  description:
+    "List every Brave visit to a URL (or URL prefix) with times and transition types. URLs come back without query strings or #fragments unless fullUrls is set.",
   notes: "Example: {argsbarg:program} visits https://github.com/bdombro/ --prefix --limit 100",
   options: [
     {
@@ -67,7 +68,13 @@ export const visitsCommand = command({
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
   handler: (ctx) => {
     const { url, prefix, from, to, profile, limit } = ctx.inputs;
-    const out: VisitsOutput = { visits: queryVisits({ url, prefix: prefix ?? false, from, to, profile, limit }) };
+    const full = ctx.inputs.fullUrls;
+    const out: VisitsOutput = {
+      visits: queryVisits({ url, prefix: prefix ?? false, from, to, profile, limit }).map((v) => ({
+        ...v,
+        url: urlClean(v.url, full),
+      })),
+    };
     if (ctx.invocation !== "cli") {
       return out;
     }

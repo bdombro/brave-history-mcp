@@ -5,9 +5,11 @@ sidecars) is copied to the cache dir when the original is newer than the cached 
 */
 
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -16,7 +18,7 @@ import {
   utimesSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 /** One Brave profile that has a History DB. */
@@ -58,12 +60,14 @@ export function ensureCachedHistory(profile: BraveProfile): string {
   );
   const cachedMtimeMs = existsSync(cached) ? statSync(cached).mtimeMs : -1;
   if (sourceMtimeMs <= cachedMtimeMs) {
+    if (existsSync(cacheDir)) lockDown(cacheDir);
     return cached;
   }
 
-  const staging = `${cacheDir}.tmp-${process.pid}`;
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: true });
+  // mkdtemp creates the staging dir 0o700 with an unpredictable name next to the final dir.
+  mkdirSync(dirname(cacheDir), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(cacheDir), 0o700);
+  const staging = mkdtempSync(join(dirname(cacheDir), `${basename(cacheDir)}.tmp-`));
   for (const suffix of ["", ...SIDECARS]) {
     if (existsSync(source + suffix)) {
       copyFileSync(source + suffix, join(staging, `History${suffix}`));
@@ -74,6 +78,7 @@ export function ensureCachedHistory(profile: BraveProfile): string {
   db.prepare("SELECT count(*) FROM sqlite_master").get();
   db.close();
 
+  lockDown(staging);
   rmSync(cacheDir, { recursive: true, force: true });
   renameSync(staging, cacheDir);
   const mtime = new Date(sourceMtimeMs);
@@ -107,6 +112,12 @@ export function selectProfiles(filter: string | undefined): BraveProfile[] {
     throw new Error(`No Brave profile matches "${filter}". Known: ${known || "none"}`);
   }
   return matched;
+}
+
+/** Browsing history is private: owner-only dir (0o700) and files (0o600), applied to existing copies too. */
+function lockDown(dir: string): void {
+  chmodSync(dir, 0o700);
+  for (const entry of readdirSync(dir)) chmodSync(join(dir, entry), 0o600);
 }
 
 const SIDECARS = ["-wal", "-journal"];

@@ -5,7 +5,7 @@ search — keyword search over page titles and URLs (words ANDed).
 import { command, OptionKind } from "argsbarg";
 import { z } from "zod";
 import { queryPages } from "../../db/index.ts";
-import { FILTER_OPTIONS, filterFields, formatPages, PagesOutput } from "../../schemas.ts";
+import { FILTER_OPTIONS, filterFields, formatPages, PagesOutput, urlClean } from "../../schemas.ts";
 
 /** Input for `search`. */
 export const SearchInput = z.strictObject({
@@ -26,7 +26,8 @@ export type SearchInput = z.infer<typeof SearchInput>;
 /** Searches history titles and URLs. */
 export const searchCommand = command({
   key: "search",
-  description: "Search Brave history by keywords in page titles and URLs.",
+  description:
+    "Search Brave history by keywords in page titles and URLs (matching uses the full stored URL). URLs come back without query strings or #fragments unless fullUrls is set.",
   notes: "Example: {argsbarg:program} search standing desk --domain amazon.com --from 2026-10-01",
   options: [
     {
@@ -50,7 +51,10 @@ export const searchCommand = command({
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
   handler: (ctx) => {
     const { words, domain, from, to, profile, limit } = ctx.inputs;
-    const out: PagesOutput = { pages: queryPages({ words, domain, from, to, profile, limit }) };
+    const full = ctx.inputs.fullUrls;
+    const out: PagesOutput = {
+      pages: queryPages({ words, domain, from, to, profile, limit }).map((p) => ({ ...p, url: urlClean(p.url, full) })),
+    };
     if (ctx.invocation === "cli") {
       console.log(ctx.hasFlag("json") ? JSON.stringify(out, null, 2) : formatPages(out));
       return;
