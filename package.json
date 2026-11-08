@@ -10,7 +10,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
     "@types/node": "^22",
-    "argsbarg": "^8.2.0",
+    "argsbarg": "^8.3.0",
     "esbuild": "^0.25.0",
     "typescript": "^7.0.2",
     "zod": "^4"
