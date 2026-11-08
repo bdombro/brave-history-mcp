@@ -1,0 +1,16 @@
+{
+  "name": "brave-history",
+  "version": "1.0.0",
+  "description": "Search Brave browser history (titles, URLs, visits) over MCP.",
+  "author": {
+    "name": "Brian Dombrowski"
+  },
+  "homepage": "https://github.com/bdombro/brave-history",
+  "repository": "https://github.com/bdombro/brave-history",
+  "mcpServers": {
+    "brave-history": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/brave-history.mjs", "mcp"]
+    }
+  }
+}
