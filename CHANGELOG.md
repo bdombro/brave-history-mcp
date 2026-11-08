@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-08
+
 ### Added
 
 - `search`: keyword search over Brave history titles and URLs (words ANDed), with domain, date range, profile and limit filters.
