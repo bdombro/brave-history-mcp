@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-09
+
+### Changed
+
+- Instruct agents to maintain the changelog (add a `[Unreleased]` entry for behavior changes).
+
 ## [1.0.4] - 2026-11-08
 
 ## [1.0.3] - 2026-11-08
