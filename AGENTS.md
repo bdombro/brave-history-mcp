@@ -29,6 +29,7 @@ When adding or changing commands, schemas, or MCP exposure:
 - **Structure:** after imports, exported symbols first (alphabetical within each kind), then module-private helpers. Relative imports with explicit `.ts` extensions.
 - **Abstractions:** keep single-use helpers in the calling file. Split only when reused, when the caller is hard to follow, or when the extraction is a substantial unit.
 - **Skill:** when commands are added, renamed, or removed, update `skills/brave-history/SKILL.md`.
+- **Changelog:** add a concise `[Unreleased]` CHANGELOG entry for behavior changes.
 
 ### Module boundaries
 
