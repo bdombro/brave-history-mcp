@@ -440,16 +440,43 @@ function ensureOpen(entry) {
 					entry.db.exec(entry.options.pragmas);
 				}
 			}
-			if (!entry.migrated && entry.options.migrateSql) {
-				if (typeof entry.options.userVersion === "number") {
+			if (!entry.migrated && entry.options.migrations) {
+				const raw = entry.options.migrations;
+				const steps = Array.isArray(raw)
+					? raw.map((sql, idx) => [idx + 1, sql])
+					: Object.entries(raw)
+							.map(([k, sql]) => [Number(k), sql])
+							.filter(([v]) => Number.isInteger(v) && v > 0)
+							.sort((a, b) => a[0] - b[0]);
+				if (steps.length > 0) {
 					const row = entry.db.prepare("PRAGMA user_version").get();
 					const currentVersion = Number(row ? row.user_version : 0);
-					if (currentVersion < entry.options.userVersion) {
-						entry.db.exec(entry.options.migrateSql);
-						entry.db.exec("PRAGMA user_version = " + entry.options.userVersion);
+					const minVersion = steps[0][0];
+					if (currentVersion > 0 && currentVersion < minVersion) {
+						throw new Error(
+							"Database user_version (" +
+								currentVersion +
+								") is older than minimum migration version (" +
+								minVersion +
+								")"
+						);
 					}
-				} else {
-					entry.db.exec(entry.options.migrateSql);
+					const pending = steps.filter(([v]) => v > currentVersion);
+					if (pending.length > 0) {
+						entry.db.exec("BEGIN IMMEDIATE");
+						try {
+							for (const [v, sql] of pending) {
+								entry.db.exec(sql);
+								entry.db.exec("PRAGMA user_version = " + v);
+							}
+							entry.db.exec("COMMIT");
+						} catch (err) {
+							try {
+								entry.db.exec("ROLLBACK");
+							} catch (_) {}
+							throw err;
+						}
+					}
 				}
 				entry.migrated = true;
 			}
