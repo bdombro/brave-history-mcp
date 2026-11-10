@@ -490,29 +490,58 @@ function ensureOpen(entry) {
 	}
 }
 
-function prepareStmt(entry, sql, readBigInts, allowBareNamed) {
+const MAX_CACHED_STMTS = 256;
+
+function prepareStmt(entry, sql, readBigInts, returnArrays) {
 	const effectiveBigInts = readBigInts !== undefined
 		? Boolean(readBigInts)
 		: Boolean(entry.options && entry.options.readBigInts);
-	const bareFlag = Boolean(allowBareNamed);
-	const key = (effectiveBigInts ? "1:" : "0:") + (bareFlag ? "N:" : "P:") + sql;
-	let stmt = entry.stmts.get(key);
-	if (!stmt) {
-		stmt = entry.db.prepare(sql);
+	const effectiveArrays = Boolean(returnArrays);
+	let cached = entry.stmts.get(sql);
+	if (!cached) {
+		const stmt = entry.db.prepare(sql);
+		if (typeof stmt.setAllowBareNamedParameters === "function") {
+			stmt.setAllowBareNamedParameters(true);
+		}
 		if (effectiveBigInts) {
 			stmt.setReadBigInts(true);
 		}
-		if (bareFlag && typeof stmt.setAllowBareNamedParameters === "function") {
-			stmt.setAllowBareNamedParameters(true);
+		if (effectiveArrays && typeof stmt.setReturnArrays === "function") {
+			stmt.setReturnArrays(true);
 		}
-		entry.stmts.set(key, stmt);
+		cached = { stmt, bigInts: effectiveBigInts, arrays: effectiveArrays };
+		if (entry.stmts.size >= MAX_CACHED_STMTS) {
+			const oldestKey = entry.stmts.keys().next().value;
+			const oldest = entry.stmts.get(oldestKey);
+			entry.stmts.delete(oldestKey);
+			if (oldest && oldest.stmt && typeof oldest.stmt.close === "function") {
+				try { oldest.stmt.close(); } catch (_) {}
+			}
+		}
+		entry.stmts.set(sql, cached);
+	} else {
+		// Refresh LRU order
+		entry.stmts.delete(sql);
+		entry.stmts.set(sql, cached);
+		if (cached.bigInts !== effectiveBigInts) {
+			cached.stmt.setReadBigInts(effectiveBigInts);
+			cached.bigInts = effectiveBigInts;
+		}
+		if (cached.arrays !== effectiveArrays && typeof cached.stmt.setReturnArrays === "function") {
+			cached.stmt.setReturnArrays(effectiveArrays);
+			cached.arrays = effectiveArrays;
+		}
 	}
-	return stmt;
+	return cached.stmt;
 }
 
 function clearStmts(entry) {
-	for (const stmt of entry.stmts.values()) {
-		try { stmt.close(); } catch (_) {}
+	for (const cached of entry.stmts.values()) {
+		try {
+			if (cached && cached.stmt && typeof cached.stmt.close === "function") {
+				cached.stmt.close();
+			}
+		} catch (_) {}
 	}
 	entry.stmts.clear();
 }
@@ -556,46 +585,31 @@ async function handleAction(action, entry, payload, dbId) {
 		}
 		case "get": {
 			ensureOpen(entry);
-			const named = isNamedParams(payload.params);
-			const s = prepareStmt(entry, payload.sql, payload.readBigInts, named);
-			const row = execStmt(s, "get", payload.params);
-			return row ? { ...row } : undefined;
+			const s = prepareStmt(entry, payload.sql, payload.readBigInts, false);
+			return execStmt(s, "get", payload.params);
 		}
 		case "all": {
 			ensureOpen(entry);
-			const named = isNamedParams(payload.params);
-			const s = prepareStmt(entry, payload.sql, payload.readBigInts, named);
-			const rows = execStmt(s, "all", payload.params);
-			return rows.map((r) => ({ ...r }));
+			const s = prepareStmt(entry, payload.sql, payload.readBigInts, false);
+			return execStmt(s, "all", payload.params);
 		}
 		case "run": {
 			ensureOpen(entry);
-			const named = isNamedParams(payload.params);
-			const s = prepareStmt(entry, payload.sql, payload.readBigInts, named);
+			const s = prepareStmt(entry, payload.sql, payload.readBigInts, false);
 			const r = execStmt(s, "run", payload.params);
 			return { changes: r.changes, lastInsertRowid: r.lastInsertRowid };
 		}
 		case "pluck": {
 			ensureOpen(entry);
-			const named = isNamedParams(payload.params);
-			const s = prepareStmt(entry, payload.sql, payload.readBigInts, named);
+			const s = prepareStmt(entry, payload.sql, payload.readBigInts, true);
 			const row = execStmt(s, "get", payload.params);
-			if (!row) {
-				return undefined;
-			}
-			const keys = Object.keys(row);
-			return keys.length > 0 ? row[keys[0]] : undefined;
+			return row ? row[0] : undefined;
 		}
 		case "pluckAll": {
 			ensureOpen(entry);
-			const named = isNamedParams(payload.params);
-			const s = prepareStmt(entry, payload.sql, payload.readBigInts, named);
+			const s = prepareStmt(entry, payload.sql, payload.readBigInts, true);
 			const rows = execStmt(s, "all", payload.params);
-			if (!rows || rows.length === 0) {
-				return [];
-			}
-			const k = Object.keys(rows[0])[0];
-			return rows.map((r) => r[k]);
+			return rows ? rows.map((r) => r[0]) : [];
 		}
 		case "exec": {
 			ensureOpen(entry);
@@ -614,37 +628,24 @@ async function handleAction(action, entry, payload, dbId) {
 			try {
 				for (const item of items) {
 					const mode = item.mode || "run";
-					const named = isNamedParams(item.params);
 					if (mode === "run") {
-						const s = prepareStmt(entry, item.sql, item.readBigInts, named);
+						const s = prepareStmt(entry, item.sql, item.readBigInts, false);
 						const r = execStmt(s, "run", item.params);
 						results.push({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
 					} else if (mode === "get") {
-						const s = prepareStmt(entry, item.sql, item.readBigInts, named);
-						const r = execStmt(s, "get", item.params);
-						results.push(r ? { ...r } : undefined);
+						const s = prepareStmt(entry, item.sql, item.readBigInts, false);
+						results.push(execStmt(s, "get", item.params));
 					} else if (mode === "all") {
-						const s = prepareStmt(entry, item.sql, item.readBigInts, named);
-						const r = execStmt(s, "all", item.params);
-						results.push(r.map((x) => ({ ...x })));
+						const s = prepareStmt(entry, item.sql, item.readBigInts, false);
+						results.push(execStmt(s, "all", item.params));
 					} else if (mode === "pluck") {
-						const s = prepareStmt(entry, item.sql, item.readBigInts, named);
+						const s = prepareStmt(entry, item.sql, item.readBigInts, true);
 						const r = execStmt(s, "get", item.params);
-						if (!r) {
-							results.push(undefined);
-						} else {
-							const keys = Object.keys(r);
-							results.push(keys.length > 0 ? r[keys[0]] : undefined);
-						}
+						results.push(r ? r[0] : undefined);
 					} else if (mode === "pluckAll") {
-						const s = prepareStmt(entry, item.sql, item.readBigInts, named);
+						const s = prepareStmt(entry, item.sql, item.readBigInts, true);
 						const r = execStmt(s, "all", item.params);
-						if (!r || r.length === 0) {
-							results.push([]);
-						} else {
-							const k = Object.keys(r[0])[0];
-							results.push(r.map((row) => row[k]));
-						}
+						results.push(r ? r.map((row) => row[0]) : []);
 					} else if (mode === "exec") {
 						clearStmts(entry);
 						entry.db.exec(item.sql);
@@ -671,17 +672,24 @@ async function handleAction(action, entry, payload, dbId) {
 			const { sql, params, limit, readBigInts, readOnlyConnection, setupSql } = payload;
 			let targetDb = entry.db;
 			let tempDb = null;
+			let resetQueryOnlyOnMain = false;
 			if (readOnlyConnection && entry.path !== ":memory:") {
 				tempDb = new sqlite.DatabaseSync(entry.path, { readOnly: true });
 				tempDb.exec("PRAGMA busy_timeout = 5000;");
 				registerFunctionsOnDb(tempDb, entry.options && entry.options.functions);
 				if (typeof setupSql === "string" && setupSql.trim().length > 0) {
 					tempDb.exec(setupSql);
-					tempDb.exec("PRAGMA query_only = ON;");
 				}
+				tempDb.exec("PRAGMA query_only = ON;");
 				targetDb = tempDb;
-			} else if (typeof setupSql === "string" && setupSql.trim().length > 0) {
-				targetDb.exec(setupSql);
+			} else {
+				if (typeof setupSql === "string" && setupSql.trim().length > 0) {
+					targetDb.exec(setupSql);
+				}
+				if (readOnlyConnection) {
+					targetDb.exec("PRAGMA query_only = ON;");
+					resetQueryOnlyOnMain = true;
+				}
 			}
 
 			let stmt = null;
@@ -703,7 +711,7 @@ async function handleAction(action, entry, payload, dbId) {
 				const iterator = named ? stmt.iterate(params) : stmt.iterate(...(params || []));
 				for (const row of iterator) {
 					if (rows.length < maxLimit) {
-						rows.push({ ...row });
+						rows.push(row);
 					} else {
 						truncated = true;
 						break;
@@ -716,6 +724,9 @@ async function handleAction(action, entry, payload, dbId) {
 			} finally {
 				if (stmt && typeof stmt.close === "function") {
 					try { stmt.close(); } catch (_) {}
+				}
+				if (resetQueryOnlyOnMain) {
+					try { targetDb.exec("PRAGMA query_only = OFF;"); } catch (_) {}
 				}
 				if (tempDb) {
 					try { tempDb.close(); } catch (_) {}
@@ -744,6 +755,9 @@ async function handleAction(action, entry, payload, dbId) {
 		case "txBegin": {
 			ensureOpen(entry);
 			const mode = payload.mode || "IMMEDIATE";
+			if (mode !== "IMMEDIATE" && mode !== "DEFERRED" && mode !== "EXCLUSIVE") {
+				throw new Error("Invalid transaction mode: " + String(mode));
+			}
 			entry.db.exec("BEGIN " + mode);
 			entry.txDepth = 1;
 			return;
@@ -765,22 +779,34 @@ async function handleAction(action, entry, payload, dbId) {
 		}
 		case "txSavepoint": {
 			ensureOpen(entry);
-			entry.txDepth = payload.depth;
-			entry.db.exec("SAVEPOINT sp_" + payload.depth);
+			const depth = Number(payload.depth);
+			if (!Number.isSafeInteger(depth) || depth < 1) {
+				throw new Error("Invalid savepoint depth");
+			}
+			entry.txDepth = depth;
+			entry.db.exec("SAVEPOINT sp_" + depth);
 			return;
 		}
 		case "txRelease": {
 			ensureOpen(entry);
-			entry.db.exec("RELEASE SAVEPOINT sp_" + payload.depth);
-			entry.txDepth = payload.depth - 1;
+			const depth = Number(payload.depth);
+			if (!Number.isSafeInteger(depth) || depth < 1) {
+				throw new Error("Invalid savepoint depth");
+			}
+			entry.db.exec("RELEASE SAVEPOINT sp_" + depth);
+			entry.txDepth = depth - 1;
 			return;
 		}
 		case "txRollbackTo": {
 			ensureOpen(entry);
+			const depth = Number(payload.depth);
+			if (!Number.isSafeInteger(depth) || depth < 1) {
+				throw new Error("Invalid savepoint depth");
+			}
 			try {
-				entry.db.exec("ROLLBACK TO SAVEPOINT sp_" + payload.depth);
+				entry.db.exec("ROLLBACK TO SAVEPOINT sp_" + depth);
 			} finally {
-				entry.txDepth = payload.depth - 1;
+				entry.txDepth = depth - 1;
 			}
 			return;
 		}
@@ -811,7 +837,7 @@ parentPort.on("message", async (msg) => {
 		});
 	}
 });
-`,nextDbSequence=1,WorkerManager=class{idleTimeoutMs;dedicated;worker=null;pendingRequests=new Map;nextReqId=1;registeredDbs=new Map;activeTxCount=0;idleTimer=null;openDbPromises=new Map;workerSpawnPromise=null;constructor(idleTimeoutMs=3e4,dedicated=!1){this.idleTimeoutMs=idleTimeoutMs,this.dedicated=dedicated}registerDb(dbId,path,options){let serializedFunctions={};if(options.functions)for(let[name,def]of Object.entries(options.functions))serializedFunctions[name]=serializeFunction(def);this.registeredDbs.set(dbId,{path,options,serializedFunctions,migrated:!1,isOpenedInWorker:!1})}registerFunction(dbId,name,def){let entry=this.registeredDbs.get(dbId);entry&&(entry.serializedFunctions[name]=def)}async getWorker(){return this.worker?this.worker:(this.workerSpawnPromise||(this.workerSpawnPromise=(async()=>{let worker=new Worker(WORKER_CODE,{eval:!0});worker.unref(),worker.on("message",msg=>{let pending=this.pendingRequests.get(msg.id);if(pending)if(this.pendingRequests.delete(msg.id),this.pendingRequests.size===0&&(this.worker?.unref(),this.checkIdle()),msg.ok)pending.resolve(msg.result);else{let err=new Error(msg.error?.message||"Unknown worker error");msg.error?.code&&(err.code=msg.error.code),msg.error?.name&&(err.name=msg.error.name),msg.error?.stack&&(err.stack=msg.error.stack),pending.reject(err)}}),worker.on("error",err=>{this.handleWorkerDeath(err)}),worker.on("exit",code=>{this.handleWorkerDeath(new Error(`SQLite worker exited with code ${code}`))}),this.worker=worker;for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1;return worker})().finally(()=>{this.workerSpawnPromise=null})),await this.workerSpawnPromise)}handleWorkerDeath(err){this.worker=null,this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1;for(let[id,pending]of this.pendingRequests.entries())this.pendingRequests.delete(id),pending.reject(err)}async sendRaw(dbId,action,payload={}){let worker=await this.getWorker();this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);let reqId=this.nextReqId++;return await new Promise((resolve7,reject)=>{this.pendingRequests.set(reqId,{resolve:resolve7,reject}),this.pendingRequests.size===1&&worker.ref(),worker.postMessage({id:reqId,dbId,action,...payload})})}async ensureDbOpen(dbId){let entry=this.registeredDbs.get(dbId);if(!entry)throw new Error(`Database ${dbId} is not registered`);if(entry.isOpenedInWorker&&this.worker)return;let openPromise=this.openDbPromises.get(dbId);openPromise||(openPromise=(async()=>{await this.getWorker();let{init:_init,functions:_functions,...workerOptions}=entry.options;await this.sendRaw(dbId,"open",{path:entry.path,options:{...workerOptions,functions:entry.serializedFunctions,migrated:entry.migrated}}),entry.isOpenedInWorker=!0,entry.migrated=!0})().finally(()=>{this.openDbPromises.delete(dbId)}),this.openDbPromises.set(dbId,openPromise)),await openPromise}async sendAction(dbId,action,payload={}){return await this.ensureDbOpen(dbId),await this.sendRaw(dbId,action,payload)}incrementTx(){this.activeTxCount++,this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null)}decrementTx(){this.activeTxCount=Math.max(0,this.activeTxCount-1),this.checkIdle()}hasMemoryDb(){for(let entry of this.registeredDbs.values())if(entry.path===":memory:")return!0;return!1}checkIdle(){this.pendingRequests.size>0||this.activeTxCount>0||this.hasMemoryDb()||(this.idleTimer&&clearTimeout(this.idleTimer),this.idleTimer=setTimeout(()=>{this.onIdleTimeout()},this.idleTimeoutMs),this.idleTimer&&typeof this.idleTimer.unref=="function"&&this.idleTimer.unref())}async onIdleTimeout(){if(this.idleTimer=null,this.pendingRequests.size>0||this.activeTxCount>0||this.hasMemoryDb())return;let currentWorker=this.worker;this.worker=null;for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1,entry.migrated=!0;if(currentWorker)try{await currentWorker.terminate()}catch{}}async closeDb(dbId){let entry=this.registeredDbs.get(dbId);if(entry)try{this.worker&&entry.isOpenedInWorker&&await this.sendRaw(dbId,"close")}catch{}finally{if(this.registeredDbs.delete(dbId),this.dedicated||this.registeredDbs.size===0){this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);let currentWorker=this.worker;if(this.worker=null,currentWorker)try{await currentWorker.terminate()}catch{}}else this.checkIdle()}}get isWorkerAlive(){return this.worker!==null}},SHARED_MANAGER_SYMBOL=Symbol.for("@slimr/sqlite.manager.v1");function getSharedManager(idleTimeoutMs){let globalObj=globalThis,mgr=globalObj[SHARED_MANAGER_SYMBOL];return mgr?idleTimeoutMs!==void 0&&idleTimeoutMs<mgr.idleTimeoutMs&&(mgr.idleTimeoutMs=idleTimeoutMs):(mgr=new WorkerManager(idleTimeoutMs??3e4,!1),globalObj[SHARED_MANAGER_SYMBOL]=mgr),mgr}var SqliteTx=class _SqliteTx{db;depth;constructor(db,depth){this.db=db,this.depth=depth}async get(sql,params,options){return await this.db._internalSendQuery("get",{sql,params,readBigInts:options?.readBigInts})}async all(sql,params,options){return await this.db._internalSendQuery("all",{sql,params,readBigInts:options?.readBigInts})}async run(sql,params,options){return await this.db._internalSendQuery("run",{sql,params,readBigInts:options?.readBigInts})}async pluck(sql,params,options){return await this.db._internalSendQuery("pluck",{sql,params,readBigInts:options?.readBigInts})}async pluckAll(sql,params,options){return await this.db._internalSendQuery("pluckAll",{sql,params,readBigInts:options?.readBigInts})}async exec(sql){await this.db._internalSendQuery("exec",{sql})}async batch(items,options){return await this.db._internalSendQuery("batch",{items,atomic:options?.atomic})}async iterateLimited(sql,params,options){return await this.db._internalSendQuery("iterateLimited",{sql,params,limit:options?.limit,readBigInts:options?.readBigInts,readOnlyConnection:options?.readOnlyConnection,setupSql:options?.setupSql})}async transaction(fn,_options){let nextDepth=this.depth+1;await this.db._internalSendAction("txSavepoint",{depth:nextDepth});let nestedTx=new _SqliteTx(this.db,nextDepth);try{let result=await fn(nestedTx);return await this.db._internalSendAction("txRelease",{depth:nextDepth}),result}catch(err){try{await this.db._internalSendAction("txRollbackTo",{depth:nextDepth})}catch{}throw err}}},SqliteDb=class{path;options;dbId;manager;_isClosed=!1;lockQueue=Promise.resolve();initPromise=null;isInitialized=!1;constructor(path,options={}){this.path=path,this.options=Object.freeze({...options}),this.dbId=`${path}:${nextDbSequence++}`,this.manager=options.dedicated?new WorkerManager(options.idleTimeoutMs,!0):getSharedManager(options.idleTimeoutMs),this.manager.registerDb(this.dbId,this.path,this.options)}get isClosed(){return this._isClosed}get isWorkerAlive(){return this.manager.isWorkerAlive}async withLock(fn){if(this._isClosed)throw new Error("Database is closed");let previousLock=this.lockQueue,releaseLock;this.lockQueue=new Promise(resolve7=>{releaseLock=resolve7}),await previousLock;try{if(this._isClosed)throw new Error("Database is closed");return await fn()}finally{releaseLock()}}async ensureInitialized(){if(this._isClosed)throw new Error("Database is closed");if(!this.isInitialized)return this.initPromise||(this.initPromise=(async()=>{if(await this.manager.ensureDbOpen(this.dbId),this.options.init){this.manager.incrementTx();try{await this.manager.sendAction(this.dbId,"txBegin",{mode:"IMMEDIATE"});let tx=new SqliteTx(this,1);try{await this.options.init(tx),await this.manager.sendAction(this.dbId,"txCommit")}catch(err){try{await this.manager.sendAction(this.dbId,"txRollback")}catch{}throw err}}finally{this.manager.decrementTx()}}this.isInitialized=!0})()),await this.initPromise}async _internalSendQuery(action,payload={}){if(this._isClosed)throw new Error("Database is closed");return await this.manager.sendAction(this.dbId,action,payload)}async _internalSendAction(action,payload={}){if(this._isClosed)throw new Error("Database is closed");await this.manager.sendAction(this.dbId,action,payload)}async get(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"get",{sql,params,readBigInts:options?.readBigInts})))}async all(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"all",{sql,params,readBigInts:options?.readBigInts})))}async run(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"run",{sql,params,readBigInts:options?.readBigInts})))}async pluck(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"pluck",{sql,params,readBigInts:options?.readBigInts})))}async pluckAll(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"pluckAll",{sql,params,readBigInts:options?.readBigInts})))}async exec(sql){await this.withLock(async()=>{await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"exec",{sql})})}async batch(items,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"batch",{items,atomic:options?.atomic})))}async iterateLimited(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"iterateLimited",{sql,params,limit:options?.limit,readBigInts:options?.readBigInts,readOnlyConnection:options?.readOnlyConnection,setupSql:options?.setupSql})))}async registerFunction(name,fn,options){await this.withLock(async()=>{await this.ensureInitialized();let def={fn,...options},serialized=serializeFunction(def);this.manager.registerFunction(this.dbId,name,serialized),await this.manager.sendAction(this.dbId,"registerFunction",{name,def:serialized})})}async transaction(fn,options){return await this.withLock(async()=>{await this.ensureInitialized(),this.manager.incrementTx();try{await this.manager.sendAction(this.dbId,"txBegin",{mode:options?.mode||"IMMEDIATE"});let tx=new SqliteTx(this,1);try{let result=await fn(tx);return await this.manager.sendAction(this.dbId,"txCommit"),result}catch(err){try{await this.manager.sendAction(this.dbId,"txRollback")}catch{}throw err}}finally{this.manager.decrementTx()}})}async backup(destPath){await this.withLock(async()=>{await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"backup",{destPath})})}async close(){this._isClosed||await this.withLock(async()=>{this._isClosed||(this._isClosed=!0,await this.manager.closeDb(this.dbId))})}};function openSqlite(path,options){return new SqliteDb(path,options)}import{existsSync as existsSync5,readdirSync as readdirSync2,readFileSync as readFileSync3}from"node:fs";import{chmod,copyFile,mkdir,mkdtemp,readdir,rename,rm,stat,utimes}from"node:fs/promises";import{homedir as homedir2}from"node:os";import{basename as basename4,dirname as dirname2,join as join6,resolve as resolve6,sep}from"node:path";function braveRoot(){return process.env.BRAVE_HISTORY_ROOT??join6(homedir2(),"Library","Application Support","BraveSoftware","Brave-Browser")}function cacheRoot(){return process.env.BRAVE_HISTORY_CACHE??join6(homedir2(),".local","share","brave-history")}async function ensureCachedHistory(profile){let root=resolve6(braveRoot()),cacheDir=resolve6(cacheRoot(),profile.dir);if(`${cacheDir}${sep}`.startsWith(`${root}${sep}`))throw new Error(`Refusing to cache inside the Brave data dir: ${cacheDir}`);let source=join6(root,profile.dir,"History"),cached2=join6(cacheDir,"History"),sourceMtimeMs=Math.max(...await Promise.all(["",...SIDECARS].map(async suffix=>{try{return(await stat(source+suffix)).mtimeMs}catch{return 0}}))),cachedMtimeMs=-1;try{cachedMtimeMs=(await stat(cached2)).mtimeMs}catch{}if(sourceMtimeMs<=cachedMtimeMs){try{await lockDown(cacheDir)}catch{}return cached2}await mkdir(dirname2(cacheDir),{recursive:!0,mode:448}),await chmod(dirname2(cacheDir),448);let staging=await mkdtemp(join6(dirname2(cacheDir),`${basename4(cacheDir)}.tmp-`));try{for(let suffix of["",...SIDECARS])try{await copyFile(source+suffix,join6(staging,`History${suffix}`))}catch(err){if(err.code!=="ENOENT")throw err}let db=openSqlite(join6(staging,"History"),{pragmas:!1});try{await db.pluck("SELECT count(*) FROM sqlite_master")}finally{await db.close()}await lockDown(staging),await rm(cacheDir,{recursive:!0,force:!0}),await rename(staging,cacheDir);let mtime=new Date(sourceMtimeMs);return await utimes(cached2,mtime,mtime),cached2}catch(err){throw await rm(staging,{recursive:!0,force:!0}).catch(()=>{}),err}}function listProfiles(){let root=braveRoot();if(!existsSync5(root))throw new Error(`Brave data dir not found: ${root} (set BRAVE_HISTORY_ROOT to override)`);let names=profileNames(root);return readdirSync2(root).filter(dir=>(dir==="Default"||/^Profile \d+$/.test(dir))&&existsSync5(join6(root,dir,"History"))).sort((a,b)=>a==="Default"?-1:b==="Default"?1:a.localeCompare(b,"en",{numeric:!0})).map(dir=>names[dir]?{dir,name:names[dir]}:{dir})}function selectProfiles(filter){let all=listProfiles();if(!filter)return all;let needle=filter.toLowerCase(),matched=all.filter(p=>p.dir.toLowerCase()===needle||p.name?.toLowerCase()===needle);if(matched.length===0){let known=all.map(p=>p.name?`${p.dir} (${p.name})`:p.dir).join(", ");throw new Error(`No Brave profile matches "${filter}". Known: ${known||"none"}`)}return matched}async function lockDown(dir){await chmod(dir,448);for(let entry of await readdir(dir))await chmod(join6(dir,entry),384)}var SIDECARS=["-wal","-journal"];function profileNames(root){try{let cache=JSON.parse(readFileSync3(join6(root,"Local State"),"utf8")).profile?.info_cache??{};return Object.fromEntries(Object.entries(cache).flatMap(([dir,info])=>info.name?[[dir,info.name]]:[]))}catch{return{}}}var CHROME_EPOCH_OFFSET_MICROS=11644473600000000n,DEFAULT_TIME_ZONE="Europe/Dublin";function formatLocalIso(unixMs,timeZone2){let wall=wallClock(unixMs,timeZone2),offsetMin=Math.round((wall.asUtcMs-Math.floor(unixMs/1e3)*1e3)/6e4),sign=offsetMin<0?"-":"+",abs=Math.abs(offsetMin);return`${wall.date}T${wall.time}${sign}${pad(Math.floor(abs/60))}:${pad(abs%60)}`}function unixMsToChromeMicros(unixMs){return BigInt(Math.trunc(unixMs))*1000n+CHROME_EPOCH_OFFSET_MICROS}function localDayStartMs(date5,timeZone2){let match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(date5);if(!match)throw new Error(`Invalid date (expected YYYY-MM-DD): ${date5}`);let guess=Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3])),first=guess-offsetMs(guess,timeZone2);return guess-offsetMs(first,timeZone2)}function offsetMs(unixMs,timeZone2){return wallClock(unixMs,timeZone2).asUtcMs-Math.floor(unixMs/1e3)*1e3}function pad(n){return String(n).padStart(2,"0")}function wallClock(unixMs,timeZone2){let parts=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:timeZone2,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(unixMs)).map(p=>[p.type,p.value]));return{asUtcMs:Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute),Number(parts.second)),date:`${parts.year}-${parts.month}-${parts.day}`,time:`${parts.hour}:${parts.minute}:${parts.second}`}}function timeZone(){return process.env.BRAVE_HISTORY_TZ??DEFAULT_TIME_ZONE}async function queryPages(query){let range=chromeRange(query),where=["u.hidden = 0"],params=[],joinParams=[],join7="LEFT JOIN visits v ON v.url = u.id",having="lastChrome > 0";range&&(join7+=" AND v.visit_time >= ? AND v.visit_time < ?",joinParams.push(range.start,range.end),having="MAX(v.visit_time) IS NOT NULL OR (u.last_visit_time >= ? AND u.last_visit_time < ?)");for(let word of query.words){where.push("(u.title LIKE ? ESCAPE '\\' OR u.url LIKE ? ESCAPE '\\')");let pattern=`%${escapeLike(word)}%`;params.push(pattern,pattern)}let domain2=normalizeDomain(query.domain);if(domain2){let d=escapeLike(domain2);where.push(`(${HOST_SQL} = ? OR ${HOST_SQL} LIKE ? ESCAPE '\\' OR ${HOST_SQL} LIKE ? ESCAPE '\\' OR ${HOST_SQL} LIKE ? ESCAPE '\\')`),params.push(domain2,`%.${d}`,`${d}:%`,`%.${d}:%`)}let sql=`
+`,nextDbSequence=1,WorkerManager=class{idleTimeoutMs;dedicated;worker=null;pendingRequests=new Map;nextReqId=1;registeredDbs=new Map;activeTxCount=0;idleTimer=null;openDbPromises=new Map;workerSpawnPromise=null;constructor(idleTimeoutMs=3e4,dedicated=!1){this.idleTimeoutMs=idleTimeoutMs,this.dedicated=dedicated}registerDb(dbId,path,options){let serializedFunctions={};if(options.functions)for(let[name,def]of Object.entries(options.functions))serializedFunctions[name]=serializeFunction(def);this.registeredDbs.set(dbId,{path,options,serializedFunctions,migrated:!1,isOpenedInWorker:!1})}registerFunction(dbId,name,def){let entry=this.registeredDbs.get(dbId);entry&&(entry.serializedFunctions[name]=def)}async getWorker(){return this.worker?this.worker:(this.workerSpawnPromise||(this.workerSpawnPromise=(async()=>{let worker=new Worker(WORKER_CODE,{eval:!0});worker.unref(),worker.on("message",msg=>{let pending=this.pendingRequests.get(msg.id);if(pending)if(this.pendingRequests.delete(msg.id),this.pendingRequests.size===0&&(this.worker?.unref(),this.checkIdle()),msg.ok)pending.resolve(msg.result);else{let err=new Error(msg.error?.message||"Unknown worker error");msg.error?.code&&(err.code=msg.error.code),msg.error?.name&&(err.name=msg.error.name),msg.error?.stack&&(err.stack=msg.error.stack),pending.reject(err)}}),worker.on("error",err=>{this.handleWorkerDeath(err)}),worker.on("exit",code=>{this.handleWorkerDeath(new Error(`SQLite worker exited with code ${code}`))}),this.worker=worker;for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1;return worker})().finally(()=>{this.workerSpawnPromise=null})),await this.workerSpawnPromise)}handleWorkerDeath(err){this.worker=null,this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1;for(let[id,pending]of this.pendingRequests.entries())this.pendingRequests.delete(id),pending.reject(err)}async sendRaw(dbId,action,payload={}){let worker=await this.getWorker();this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);let reqId=this.nextReqId++;return await new Promise((resolve7,reject)=>{this.pendingRequests.set(reqId,{resolve:resolve7,reject}),this.pendingRequests.size===1&&worker.ref(),worker.postMessage({id:reqId,dbId,action,...payload})})}async ensureDbOpen(dbId){let entry=this.registeredDbs.get(dbId);if(!entry)throw new Error(`Database ${dbId} is not registered`);if(entry.isOpenedInWorker&&this.worker)return;let openPromise=this.openDbPromises.get(dbId);openPromise||(openPromise=(async()=>{await this.getWorker();let{init:_init,functions:_functions,...workerOptions}=entry.options;await this.sendRaw(dbId,"open",{path:entry.path,options:{...workerOptions,functions:entry.serializedFunctions,migrated:entry.migrated}}),entry.isOpenedInWorker=!0,entry.migrated=!0})().finally(()=>{this.openDbPromises.delete(dbId)}),this.openDbPromises.set(dbId,openPromise)),await openPromise}async sendAction(dbId,action,payload={}){return await this.ensureDbOpen(dbId),await this.sendRaw(dbId,action,payload)}incrementTx(){this.activeTxCount++,this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null)}decrementTx(){this.activeTxCount=Math.max(0,this.activeTxCount-1),this.checkIdle()}hasMemoryDb(){for(let entry of this.registeredDbs.values())if(entry.path===":memory:")return!0;return!1}checkIdle(){this.pendingRequests.size>0||this.activeTxCount>0||this.hasMemoryDb()||(this.idleTimer&&clearTimeout(this.idleTimer),this.idleTimer=setTimeout(()=>{this.onIdleTimeout()},this.idleTimeoutMs),this.idleTimer&&typeof this.idleTimer.unref=="function"&&this.idleTimer.unref())}async onIdleTimeout(){if(this.idleTimer=null,this.pendingRequests.size>0||this.activeTxCount>0||this.hasMemoryDb())return;let currentWorker=this.worker;this.worker=null;for(let entry of this.registeredDbs.values())entry.isOpenedInWorker=!1,entry.migrated=!0;if(currentWorker)try{await currentWorker.terminate()}catch{}}async closeDb(dbId){let entry=this.registeredDbs.get(dbId);if(entry)try{this.worker&&entry.isOpenedInWorker&&await this.sendRaw(dbId,"close")}catch{}finally{if(this.registeredDbs.delete(dbId),this.dedicated||this.registeredDbs.size===0){this.idleTimer&&(clearTimeout(this.idleTimer),this.idleTimer=null);let currentWorker=this.worker;if(this.worker=null,currentWorker)try{await currentWorker.terminate()}catch{}}else this.checkIdle()}}get isWorkerAlive(){return this.worker!==null}},SHARED_MANAGER_SYMBOL=Symbol.for("@slimr/sqlite.manager.v1");function getSharedManager(idleTimeoutMs){let globalObj=globalThis,mgr=globalObj[SHARED_MANAGER_SYMBOL];return mgr?idleTimeoutMs!==void 0&&idleTimeoutMs<mgr.idleTimeoutMs&&(mgr.idleTimeoutMs=idleTimeoutMs):(mgr=new WorkerManager(idleTimeoutMs??3e4,!1),globalObj[SHARED_MANAGER_SYMBOL]=mgr),mgr}var SqliteTx=class _SqliteTx{db;depth;constructor(db,depth){this.db=db,this.depth=depth}async get(sql,params,options){return await this.db._internalSendQuery("get",{sql,params,readBigInts:options?.readBigInts})}async all(sql,params,options){return await this.db._internalSendQuery("all",{sql,params,readBigInts:options?.readBigInts})}async run(sql,params,options){return await this.db._internalSendQuery("run",{sql,params,readBigInts:options?.readBigInts})}async pluck(sql,params,options){return await this.db._internalSendQuery("pluck",{sql,params,readBigInts:options?.readBigInts})}async pluckAll(sql,params,options){return await this.db._internalSendQuery("pluckAll",{sql,params,readBigInts:options?.readBigInts})}async exec(sql){await this.db._internalSendQuery("exec",{sql})}async batch(items,options){return await this.db._internalSendQuery("batch",{items,atomic:options?.atomic})}async iterateLimited(sql,params,options){return await this.db._internalSendQuery("iterateLimited",{sql,params,limit:options?.limit,readBigInts:options?.readBigInts,readOnlyConnection:options?.readOnlyConnection,setupSql:options?.setupSql})}async transaction(fn,_options){let nextDepth=this.depth+1;await this.db._internalSendAction("txSavepoint",{depth:nextDepth});let nestedTx=new _SqliteTx(this.db,nextDepth);try{let result=await fn(nestedTx);return await this.db._internalSendAction("txRelease",{depth:nextDepth}),result}catch(err){try{await this.db._internalSendAction("txRollbackTo",{depth:nextDepth})}catch{}throw err}}},SqliteDb=class{path;options;dbId;manager;_isClosed=!1;lockQueue=Promise.resolve();initPromise=null;isInitialized=!1;constructor(path,options={}){this.path=path,this.options=Object.freeze({...options}),this.dbId=`${path}:${nextDbSequence++}`,this.isInitialized=!options.init,this.manager=options.dedicated?new WorkerManager(options.idleTimeoutMs,!0):getSharedManager(options.idleTimeoutMs),this.manager.registerDb(this.dbId,this.path,this.options)}get isClosed(){return this._isClosed}get isWorkerAlive(){return this.manager.isWorkerAlive}async withLock(fn){if(this._isClosed)throw new Error("Database is closed");let previousLock=this.lockQueue,releaseLock;this.lockQueue=new Promise(resolve7=>{releaseLock=resolve7}),await previousLock;try{if(this._isClosed)throw new Error("Database is closed");return await fn()}finally{releaseLock()}}async ensureInitialized(){if(this._isClosed)throw new Error("Database is closed");if(!this.isInitialized)return this.initPromise||(this.initPromise=(async()=>{if(await this.manager.ensureDbOpen(this.dbId),this.options.init){this.manager.incrementTx();try{await this.manager.sendAction(this.dbId,"txBegin",{mode:"IMMEDIATE"});let tx=new SqliteTx(this,1);try{await this.options.init(tx),await this.manager.sendAction(this.dbId,"txCommit")}catch(err){try{await this.manager.sendAction(this.dbId,"txRollback")}catch{}throw err}}finally{this.manager.decrementTx()}}this.isInitialized=!0})()),await this.initPromise}async _internalSendQuery(action,payload={}){if(this._isClosed)throw new Error("Database is closed");return await this.manager.sendAction(this.dbId,action,payload)}async _internalSendAction(action,payload={}){if(this._isClosed)throw new Error("Database is closed");await this.manager.sendAction(this.dbId,action,payload)}async get(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"get",{sql,params,readBigInts:options?.readBigInts})))}async all(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"all",{sql,params,readBigInts:options?.readBigInts})))}async run(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"run",{sql,params,readBigInts:options?.readBigInts})))}async pluck(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"pluck",{sql,params,readBigInts:options?.readBigInts})))}async pluckAll(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"pluckAll",{sql,params,readBigInts:options?.readBigInts})))}async exec(sql){await this.withLock(async()=>{await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"exec",{sql})})}async batch(items,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"batch",{items,atomic:options?.atomic})))}async iterateLimited(sql,params,options){return await this.withLock(async()=>(await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"iterateLimited",{sql,params,limit:options?.limit,readBigInts:options?.readBigInts,readOnlyConnection:options?.readOnlyConnection,setupSql:options?.setupSql})))}async registerFunction(name,fn,options){await this.withLock(async()=>{await this.ensureInitialized();let def={fn,...options},serialized=serializeFunction(def);this.manager.registerFunction(this.dbId,name,serialized),await this.manager.sendAction(this.dbId,"registerFunction",{name,def:serialized})})}async transaction(fn,options){return await this.withLock(async()=>{await this.ensureInitialized(),this.manager.incrementTx();try{await this.manager.sendAction(this.dbId,"txBegin",{mode:options?.mode||"IMMEDIATE"});let tx=new SqliteTx(this,1);try{let result=await fn(tx);return await this.manager.sendAction(this.dbId,"txCommit"),result}catch(err){try{await this.manager.sendAction(this.dbId,"txRollback")}catch{}throw err}}finally{this.manager.decrementTx()}})}async backup(destPath){await this.withLock(async()=>{await this.ensureInitialized(),await this.manager.sendAction(this.dbId,"backup",{destPath})})}async close(){this._isClosed||await this.withLock(async()=>{this._isClosed||(this._isClosed=!0,await this.manager.closeDb(this.dbId))})}};function openSqlite(path,options){return new SqliteDb(path,options)}import{existsSync as existsSync5,readdirSync as readdirSync2,readFileSync as readFileSync3}from"node:fs";import{chmod,copyFile,mkdir,mkdtemp,readdir,rename,rm,stat,utimes}from"node:fs/promises";import{homedir as homedir2}from"node:os";import{basename as basename4,dirname as dirname2,join as join6,resolve as resolve6,sep}from"node:path";function braveRoot(){return process.env.BRAVE_HISTORY_ROOT??join6(homedir2(),"Library","Application Support","BraveSoftware","Brave-Browser")}function cacheRoot(){return process.env.BRAVE_HISTORY_CACHE??join6(homedir2(),".local","share","brave-history")}async function ensureCachedHistory(profile){let root=resolve6(braveRoot()),cacheDir=resolve6(cacheRoot(),profile.dir);if(`${cacheDir}${sep}`.startsWith(`${root}${sep}`))throw new Error(`Refusing to cache inside the Brave data dir: ${cacheDir}`);let source=join6(root,profile.dir,"History"),cached2=join6(cacheDir,"History"),sourceMtimeMs=Math.max(...await Promise.all(["",...SIDECARS].map(async suffix=>{try{return(await stat(source+suffix)).mtimeMs}catch{return 0}}))),cachedMtimeMs=-1;try{cachedMtimeMs=(await stat(cached2)).mtimeMs}catch{}if(sourceMtimeMs<=cachedMtimeMs){try{await lockDown(cacheDir)}catch{}return cached2}await mkdir(dirname2(cacheDir),{recursive:!0,mode:448}),await chmod(dirname2(cacheDir),448);let staging=await mkdtemp(join6(dirname2(cacheDir),`${basename4(cacheDir)}.tmp-`));try{for(let suffix of["",...SIDECARS])try{await copyFile(source+suffix,join6(staging,`History${suffix}`))}catch(err){if(err.code!=="ENOENT")throw err}let db=openSqlite(join6(staging,"History"),{pragmas:!1});try{await db.pluck("SELECT count(*) FROM sqlite_master")}finally{await db.close()}await lockDown(staging),await rm(cacheDir,{recursive:!0,force:!0}),await rename(staging,cacheDir);let mtime=new Date(sourceMtimeMs);return await utimes(cached2,mtime,mtime),cached2}catch(err){throw await rm(staging,{recursive:!0,force:!0}).catch(()=>{}),err}}function listProfiles(){let root=braveRoot();if(!existsSync5(root))throw new Error(`Brave data dir not found: ${root} (set BRAVE_HISTORY_ROOT to override)`);let names=profileNames(root);return readdirSync2(root).filter(dir=>(dir==="Default"||/^Profile \d+$/.test(dir))&&existsSync5(join6(root,dir,"History"))).sort((a,b)=>a==="Default"?-1:b==="Default"?1:a.localeCompare(b,"en",{numeric:!0})).map(dir=>names[dir]?{dir,name:names[dir]}:{dir})}function selectProfiles(filter){let all=listProfiles();if(!filter)return all;let needle=filter.toLowerCase(),matched=all.filter(p=>p.dir.toLowerCase()===needle||p.name?.toLowerCase()===needle);if(matched.length===0){let known=all.map(p=>p.name?`${p.dir} (${p.name})`:p.dir).join(", ");throw new Error(`No Brave profile matches "${filter}". Known: ${known||"none"}`)}return matched}async function lockDown(dir){await chmod(dir,448);for(let entry of await readdir(dir))await chmod(join6(dir,entry),384)}var SIDECARS=["-wal","-journal"];function profileNames(root){try{let cache=JSON.parse(readFileSync3(join6(root,"Local State"),"utf8")).profile?.info_cache??{};return Object.fromEntries(Object.entries(cache).flatMap(([dir,info])=>info.name?[[dir,info.name]]:[]))}catch{return{}}}var CHROME_EPOCH_OFFSET_MICROS=11644473600000000n,DEFAULT_TIME_ZONE="Europe/Dublin";function formatLocalIso(unixMs,timeZone2){let wall=wallClock(unixMs,timeZone2),offsetMin=Math.round((wall.asUtcMs-Math.floor(unixMs/1e3)*1e3)/6e4),sign=offsetMin<0?"-":"+",abs=Math.abs(offsetMin);return`${wall.date}T${wall.time}${sign}${pad(Math.floor(abs/60))}:${pad(abs%60)}`}function unixMsToChromeMicros(unixMs){return BigInt(Math.trunc(unixMs))*1000n+CHROME_EPOCH_OFFSET_MICROS}function localDayStartMs(date5,timeZone2){let match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(date5);if(!match)throw new Error(`Invalid date (expected YYYY-MM-DD): ${date5}`);let guess=Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3])),first=guess-offsetMs(guess,timeZone2);return guess-offsetMs(first,timeZone2)}function offsetMs(unixMs,timeZone2){return wallClock(unixMs,timeZone2).asUtcMs-Math.floor(unixMs/1e3)*1e3}function pad(n){return String(n).padStart(2,"0")}function wallClock(unixMs,timeZone2){let parts=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:timeZone2,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(unixMs)).map(p=>[p.type,p.value]));return{asUtcMs:Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute),Number(parts.second)),date:`${parts.year}-${parts.month}-${parts.day}`,time:`${parts.hour}:${parts.minute}:${parts.second}`}}function timeZone(){return process.env.BRAVE_HISTORY_TZ??DEFAULT_TIME_ZONE}async function queryPages(query){let range=chromeRange(query),where=["u.hidden = 0"],params=[],joinParams=[],join7="LEFT JOIN visits v ON v.url = u.id",having="lastChrome > 0";range&&(join7+=" AND v.visit_time >= ? AND v.visit_time < ?",joinParams.push(range.start,range.end),having="MAX(v.visit_time) IS NOT NULL OR (u.last_visit_time >= ? AND u.last_visit_time < ?)");for(let word of query.words){where.push("(u.title LIKE ? ESCAPE '\\' OR u.url LIKE ? ESCAPE '\\')");let pattern=`%${escapeLike(word)}%`;params.push(pattern,pattern)}let domain2=normalizeDomain(query.domain);if(domain2){let d=escapeLike(domain2);where.push(`(${HOST_SQL} = ? OR ${HOST_SQL} LIKE ? ESCAPE '\\' OR ${HOST_SQL} LIKE ? ESCAPE '\\' OR ${HOST_SQL} LIKE ? ESCAPE '\\')`),params.push(domain2,`%.${d}`,`${d}:%`,`%.${d}:%`)}let sql=`
     SELECT u.url, u.title, u.visit_count AS visitCount,
       COALESCE(MAX(v.visit_time), u.last_visit_time) AS lastChrome,
       (COALESCE(MAX(v.visit_time), u.last_visit_time) - ${CHROME_EPOCH_OFFSET_MICROS}) / 1000 AS lastMs
