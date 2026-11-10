@@ -83,7 +83,7 @@ export async function ensureCachedHistory(profile: BraveProfile): Promise<string
     // Open the copy read-write once so SQLite folds any WAL or hot journal into it; later reads are read-only.
     const db = openSqlite(join(staging, "History"), { pragmas: false });
     try {
-      await db.get("SELECT count(*) FROM sqlite_master");
+      await db.pluck("SELECT count(*) FROM sqlite_master");
     } finally {
       await db.close();
     }
