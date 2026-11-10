@@ -36,11 +36,12 @@ export const listCommand = command({
   inputSchema: ListInput,
   outputSchema: PagesOutput,
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
-  handler: (ctx) => {
+  handler: async (ctx) => {
     const { domain, from, to, profile, limit } = ctx.inputs;
     const full = ctx.inputs.fullUrls;
+    const pages = await queryPages({ words: [], domain, from, to, profile, limit });
     const out: PagesOutput = {
-      pages: queryPages({ words: [], domain, from, to, profile, limit }).map((p) => ({
+      pages: pages.map((p) => ({
         ...p,
         url: urlClean(p.url, full),
       })),

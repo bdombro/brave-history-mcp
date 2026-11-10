@@ -49,11 +49,12 @@ export const searchCommand = command({
   inputSchema: SearchInput,
   outputSchema: PagesOutput,
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
-  handler: (ctx) => {
+  handler: async (ctx) => {
     const { words, domain, from, to, profile, limit } = ctx.inputs;
     const full = ctx.inputs.fullUrls;
+    const pages = await queryPages({ words, domain, from, to, profile, limit });
     const out: PagesOutput = {
-      pages: queryPages({ words, domain, from, to, profile, limit }).map((p) => ({ ...p, url: urlClean(p.url, full) })),
+      pages: pages.map((p) => ({ ...p, url: urlClean(p.url, full) })),
     };
     if (ctx.invocation === "cli") {
       console.log(ctx.hasFlag("json") ? JSON.stringify(out, null, 2) : formatPages(out));

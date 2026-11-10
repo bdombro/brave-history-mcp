@@ -4,22 +4,11 @@ Brave locks History while running, so queries never touch it: the file (plus -wa
 sidecars) is copied to the cache dir when the original is newer than the cached copy.
 */
 
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  utimesSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { chmod, copyFile, mkdir, mkdtemp, readdir, rename, rm, stat, utimes } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { openSqlite } from "@slimr/sqlite";
 
 /** One Brave profile that has a History DB. */
 export interface BraveProfile {
@@ -47,7 +36,7 @@ export function cacheRoot(): string {
  * Copies when the original (or a sidecar) has a newer mtime than the cached copy; the copy's
  * mtime is then set to the original's so the next call can skip the copy.
  */
-export function ensureCachedHistory(profile: BraveProfile): string {
+export async function ensureCachedHistory(profile: BraveProfile): Promise<string> {
   const root = resolve(braveRoot());
   const cacheDir = resolve(cacheRoot(), profile.dir);
   if (`${cacheDir}${sep}`.startsWith(`${root}${sep}`)) {
@@ -56,34 +45,59 @@ export function ensureCachedHistory(profile: BraveProfile): string {
   const source = join(root, profile.dir, "History");
   const cached = join(cacheDir, "History");
   const sourceMtimeMs = Math.max(
-    ...["", ...SIDECARS].map((suffix) => (existsSync(source + suffix) ? statSync(source + suffix).mtimeMs : 0)),
+    ...(await Promise.all(
+      ["", ...SIDECARS].map(async (suffix) => {
+        try {
+          return (await stat(source + suffix)).mtimeMs;
+        } catch {
+          return 0;
+        }
+      }),
+    )),
   );
-  const cachedMtimeMs = existsSync(cached) ? statSync(cached).mtimeMs : -1;
+  let cachedMtimeMs = -1;
+  try {
+    cachedMtimeMs = (await stat(cached)).mtimeMs;
+  } catch {}
   if (sourceMtimeMs <= cachedMtimeMs) {
-    if (existsSync(cacheDir)) lockDown(cacheDir);
+    try {
+      await lockDown(cacheDir);
+    } catch {
+      // cacheDir doesn't exist or couldn't be locked down
+    }
     return cached;
   }
 
   // mkdtemp creates the staging dir 0o700 with an unpredictable name next to the final dir.
-  mkdirSync(dirname(cacheDir), { recursive: true, mode: 0o700 });
-  chmodSync(dirname(cacheDir), 0o700);
-  const staging = mkdtempSync(join(dirname(cacheDir), `${basename(cacheDir)}.tmp-`));
-  for (const suffix of ["", ...SIDECARS]) {
-    if (existsSync(source + suffix)) {
-      copyFileSync(source + suffix, join(staging, `History${suffix}`));
+  await mkdir(dirname(cacheDir), { recursive: true, mode: 0o700 });
+  await chmod(dirname(cacheDir), 0o700);
+  const staging = await mkdtemp(join(dirname(cacheDir), `${basename(cacheDir)}.tmp-`));
+  try {
+    for (const suffix of ["", ...SIDECARS]) {
+      try {
+        await copyFile(source + suffix, join(staging, `History${suffix}`));
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
     }
-  }
-  // Open the copy read-write once so SQLite folds any WAL or hot journal into it; later reads are read-only.
-  const db = new DatabaseSync(join(staging, "History"));
-  db.prepare("SELECT count(*) FROM sqlite_master").get();
-  db.close();
+    // Open the copy read-write once so SQLite folds any WAL or hot journal into it; later reads are read-only.
+    const db = openSqlite(join(staging, "History"), { pragmas: false });
+    try {
+      await db.get("SELECT count(*) FROM sqlite_master");
+    } finally {
+      await db.close();
+    }
 
-  lockDown(staging);
-  rmSync(cacheDir, { recursive: true, force: true });
-  renameSync(staging, cacheDir);
-  const mtime = new Date(sourceMtimeMs);
-  utimesSync(cached, mtime, mtime);
-  return cached;
+    await lockDown(staging);
+    await rm(cacheDir, { recursive: true, force: true });
+    await rename(staging, cacheDir);
+    const mtime = new Date(sourceMtimeMs);
+    await utimes(cached, mtime, mtime);
+    return cached;
+  } catch (err) {
+    await rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 /** Lists profiles under {@link braveRoot} that have a History DB (`Default` first). */
@@ -115,9 +129,9 @@ export function selectProfiles(filter: string | undefined): BraveProfile[] {
 }
 
 /** Browsing history is private: owner-only dir (0o700) and files (0o600), applied to existing copies too. */
-function lockDown(dir: string): void {
-  chmodSync(dir, 0o700);
-  for (const entry of readdirSync(dir)) chmodSync(join(dir, entry), 0o600);
+async function lockDown(dir: string): Promise<void> {
+  await chmod(dir, 0o700);
+  for (const entry of await readdir(dir)) await chmod(join(dir, entry), 0o600);
 }
 
 const SIDECARS = ["-wal", "-journal"];

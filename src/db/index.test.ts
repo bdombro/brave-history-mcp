@@ -43,60 +43,60 @@ before(() => {
 });
 
 describe("queryPages (search/list)", () => {
-  const search = (words: string[], extra: Partial<Parameters<typeof queryPages>[0]> = {}) =>
-    queryPages({ words, limit: 25, ...extra }).map((p) => p.url);
+  const search = async (words: string[], extra: Partial<Parameters<typeof queryPages>[0]> = {}) =>
+    (await queryPages({ words, limit: 25, ...extra })).map((p) => p.url);
 
-  test("ANDs words across title and URL, case-insensitive, across profiles newest first", () => {
-    assert.deepEqual(search(["STANDING", "desk"]), [
+  test("ANDs words across title and URL, case-insensitive, across profiles newest first", async () => {
+    assert.deepEqual(await search(["STANDING", "desk"]), [
       "https://www.amazon.com/Standing-Desk/dp/B01",
       "https://news.example.org/standing-desks",
     ]);
-    assert.deepEqual(search(["flexispot", "amazon"]), ["https://www.amazon.com/Standing-Desk/dp/B01"]);
-    assert.deepEqual(search(["flexispot", "ebay"]), []);
+    assert.deepEqual(await search(["flexispot", "amazon"]), ["https://www.amazon.com/Standing-Desk/dp/B01"]);
+    assert.deepEqual(await search(["flexispot", "ebay"]), []);
   });
 
-  test("treats % and _ literally", () => {
-    assert.deepEqual(search(["100%"]), ["https://example.com/100%25-off"]);
-    assert.deepEqual(search(["_"]), []);
+  test("treats % and _ literally", async () => {
+    assert.deepEqual(await search(["100%"]), ["https://example.com/100%25-off"]);
+    assert.deepEqual(await search(["_"]), []);
   });
 
-  test("excludes hidden URLs", () => {
-    assert.deepEqual(search(["frame"]), []);
+  test("excludes hidden URLs", async () => {
+    assert.deepEqual(await search(["frame"]), []);
   });
 
-  test("domain matches the host and subdomains (with ports), not lookalikes", () => {
-    assert.deepEqual(search([], { domain: "amazon.com" }), [
+  test("domain matches the host and subdomains (with ports), not lookalikes", async () => {
+    assert.deepEqual(await search([], { domain: "amazon.com" }), [
       "https://www.amazon.com/Standing-Desk/dp/B01",
       "https://amazon.com/",
       "https://smile.amazon.com:8443/x",
     ]);
-    assert.deepEqual(search([], { domain: "https://WWW.Amazon.com/whatever" }), [
+    assert.deepEqual(await search([], { domain: "https://WWW.Amazon.com/whatever" }), [
       "https://www.amazon.com/Standing-Desk/dp/B01",
     ]);
   });
 
-  test("date range is inclusive local days and reports the last visit inside it", () => {
-    const pages = queryPages({ words: ["desk"], from: "2026-06-30", to: "2026-06-30", limit: 25 });
+  test("date range is inclusive local days and reports the last visit inside it", async () => {
+    const pages = await queryPages({ words: ["desk"], from: "2026-06-30", to: "2026-06-30", limit: 25 });
     assert.deepEqual(
       pages.map((p) => [p.url, p.lastVisit, p.visitCount]),
       [["https://www.amazon.com/Standing-Desk/dp/B01", "2026-06-30T23:30:00+01:00", 2]],
     );
-    assert.deepEqual(search([], { from: "2026-07-01", to: "2026-07-01" }), [
+    assert.deepEqual(await search([], { from: "2026-07-01", to: "2026-07-01" }), [
       "https://news.example.org/standing-desks",
       "https://notamazon.com/desk",
       "https://amazon.com/",
     ]);
-    assert.deepEqual(search([], { to: "2025-12-31" }), ["https://smile.amazon.com:8443/x"]);
-    assert.deepEqual(search(["desk"], { from: "2026-07-02" }), ["https://www.amazon.com/Standing-Desk/dp/B01"]);
+    assert.deepEqual(await search([], { to: "2025-12-31" }), ["https://smile.amazon.com:8443/x"]);
+    assert.deepEqual(await search(["desk"], { from: "2026-07-02" }), ["https://www.amazon.com/Standing-Desk/dp/B01"]);
   });
 
-  test("profile filter and limit", () => {
-    assert.deepEqual(search(["desk"], { profile: "Profile 1" }), ["https://news.example.org/standing-desks"]);
-    assert.equal(search([], { limit: 2 }).length, 2);
+  test("profile filter and limit", async () => {
+    assert.deepEqual(await search(["desk"], { profile: "Profile 1" }), ["https://news.example.org/standing-desks"]);
+    assert.equal((await search([], { limit: 2 })).length, 2);
   });
 
-  test("returns title, ISO Dublin last visit, visit count and profile", () => {
-    const [row] = queryPages({ words: ["flexispot"], limit: 1 });
+  test("returns title, ISO Dublin last visit, visit count and profile", async () => {
+    const [row] = await queryPages({ words: ["flexispot"], limit: 1 });
     assert.deepEqual(row, {
       title: "FlexiSpot Standing Desk",
       url: "https://www.amazon.com/Standing-Desk/dp/B01",
@@ -108,47 +108,50 @@ describe("queryPages (search/list)", () => {
 });
 
 describe("queryVisits", () => {
-  test("exact URL returns every visit with transition and duration, newest first", () => {
-    assert.deepEqual(queryVisits({ url: "https://www.amazon.com/Standing-Desk/dp/B01", prefix: false, limit: 25 }), [
-      {
-        time: "2026-07-02T11:00:00+01:00",
-        url: "https://www.amazon.com/Standing-Desk/dp/B01",
-        title: "FlexiSpot Standing Desk",
-        transition: "link",
-        durationSeconds: 95,
-        profile: "Default",
-      },
-      {
-        time: "2026-06-30T23:30:00+01:00",
-        url: "https://www.amazon.com/Standing-Desk/dp/B01",
-        title: "FlexiSpot Standing Desk",
-        transition: "typed",
-        durationSeconds: 0,
-        profile: "Default",
-      },
-    ]);
+  test("exact URL returns every visit with transition and duration, newest first", async () => {
+    assert.deepEqual(
+      await queryVisits({ url: "https://www.amazon.com/Standing-Desk/dp/B01", prefix: false, limit: 25 }),
+      [
+        {
+          time: "2026-07-02T11:00:00+01:00",
+          url: "https://www.amazon.com/Standing-Desk/dp/B01",
+          title: "FlexiSpot Standing Desk",
+          transition: "link",
+          durationSeconds: 95,
+          profile: "Default",
+        },
+        {
+          time: "2026-06-30T23:30:00+01:00",
+          url: "https://www.amazon.com/Standing-Desk/dp/B01",
+          title: "FlexiSpot Standing Desk",
+          transition: "typed",
+          durationSeconds: 0,
+          profile: "Default",
+        },
+      ],
+    );
   });
 
-  test("exact URL also tries a trailing slash; qualifier bits are masked off", () => {
+  test("exact URL also tries a trailing slash; qualifier bits are masked off", async () => {
     assert.deepEqual(
-      queryVisits({ url: "https://amazon.com", prefix: false, limit: 25 }).map((v) => v.url),
+      (await queryVisits({ url: "https://amazon.com", prefix: false, limit: 25 })).map((v) => v.url),
       ["https://amazon.com/"],
     );
     assert.equal(
-      queryVisits({ url: "https://example.com/100%25-off", prefix: false, limit: 25 })[0].transition,
+      (await queryVisits({ url: "https://example.com/100%25-off", prefix: false, limit: 25 }))[0].transition,
       "reload",
     );
   });
 
-  test("prefix matches URLs under it and honours the date range", () => {
+  test("prefix matches URLs under it and honours the date range", async () => {
     assert.deepEqual(
-      queryVisits({ url: "https://www.amazon.com/", prefix: true, limit: 25 }).map((v) => v.time),
+      (await queryVisits({ url: "https://www.amazon.com/", prefix: true, limit: 25 })).map((v) => v.time),
       ["2026-07-02T11:00:00+01:00", "2026-06-30T23:30:00+01:00"],
     );
     assert.equal(
-      queryVisits({ url: "https://www.amazon.com/", prefix: true, from: "2026-07-01", limit: 25 }).length,
+      (await queryVisits({ url: "https://www.amazon.com/", prefix: true, from: "2026-07-01", limit: 25 })).length,
       1,
     );
-    assert.equal(queryVisits({ url: "https://example.com/1", prefix: false, limit: 25 }).length, 0);
+    assert.equal((await queryVisits({ url: "https://example.com/1", prefix: false, limit: 25 })).length, 0);
   });
 });

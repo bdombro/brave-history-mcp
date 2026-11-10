@@ -66,11 +66,12 @@ export const visitsCommand = command({
   inputSchema: VisitsInput,
   outputSchema: VisitsOutput,
   mcpTool: { annotations: { readOnlyHint: true, openWorldHint: false } },
-  handler: (ctx) => {
+  handler: async (ctx) => {
     const { url, prefix, from, to, profile, limit } = ctx.inputs;
     const full = ctx.inputs.fullUrls;
+    const visits = await queryVisits({ url, prefix: prefix ?? false, from, to, profile, limit });
     const out: VisitsOutput = {
-      visits: queryVisits({ url, prefix: prefix ?? false, from, to, profile, limit }).map((v) => ({
+      visits: visits.map((v) => ({
         ...v,
         url: urlClean(v.url, full),
       })),

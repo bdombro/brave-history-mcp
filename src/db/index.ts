@@ -3,7 +3,7 @@ Read-only queries over the cached copies of Brave's Chromium History DBs (`urls`
 Each query runs per selected profile, then results are merged newest first.
 */
 
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { openSqlite, type SQLInputValue } from "@slimr/sqlite";
 import { type BraveProfile, ensureCachedHistory, selectProfiles } from "./snapshot.ts";
 import {
   CHROME_EPOCH_OFFSET_MICROS,
@@ -66,7 +66,7 @@ export function timeZone(): string {
 }
 
 /** Pages matching `query`, newest last visit first. Last visit is the latest one inside the date range. */
-export function queryPages(query: PageQuery): PageRow[] {
+export async function queryPages(query: PageQuery): Promise<PageRow[]> {
   const range = chromeRange(query);
   const where = ["u.hidden = 0"];
   const params: SQLInputValue[] = [];
@@ -103,7 +103,7 @@ export function queryPages(query: PageQuery): PageRow[] {
     LIMIT ?`;
   const allParams = [...joinParams, ...params, ...(range ? [range.start, range.end] : []), query.limit];
   const tz = timeZone();
-  return acrossProfiles(query, sql, allParams, (row, profile) => ({
+  return await acrossProfiles(query, sql, allParams, (row, profile) => ({
     title: String(row.title ?? ""),
     url: String(row.url),
     lastVisit: formatLocalIso(Number(row.lastMs), tz),
@@ -113,7 +113,7 @@ export function queryPages(query: PageQuery): PageRow[] {
 }
 
 /** Visits to `query.url` (or URLs under it), newest first. */
-export function queryVisits(query: VisitQuery): VisitRow[] {
+export async function queryVisits(query: VisitQuery): Promise<VisitRow[]> {
   const range = chromeRange(query);
   const where: string[] = [];
   const params: SQLInputValue[] = [];
@@ -137,7 +137,7 @@ export function queryVisits(query: VisitQuery): VisitRow[] {
     ORDER BY v.visit_time DESC
     LIMIT ?`;
   const tz = timeZone();
-  return acrossProfiles(query, sql, [...params, query.limit], (row, profile) => ({
+  return await acrossProfiles(query, sql, [...params, query.limit], (row, profile) => ({
     time: formatLocalIso(Number(row.timeMs), tz),
     url: String(row.url),
     title: String(row.title ?? ""),
@@ -171,24 +171,24 @@ const TRANSITIONS = [
  * Runs `sql` against each selected profile's cached History copy (read-only), maps rows, and
  * merges them by the row's Chromium time column (`lastChrome` / `timeChrome`), newest first.
  */
-function acrossProfiles<T>(
+async function acrossProfiles<T>(
   filters: HistoryFilters,
   sql: string,
   params: SQLInputValue[],
   toRow: (row: Record<string, unknown>, profile: BraveProfile) => T,
-): T[] {
+): Promise<T[]> {
   const merged: { chrome: bigint; row: T }[] = [];
   for (const profile of selectProfiles(filters.profile)) {
-    const db = new DatabaseSync(ensureCachedHistory(profile), { readOnly: true });
+    const cachedPath = await ensureCachedHistory(profile);
+    const db = openSqlite(cachedPath, { readOnly: true, readBigInts: true });
     try {
-      const statement = db.prepare(sql);
-      statement.setReadBigInts(true);
-      for (const row of statement.all(...params) as Record<string, unknown>[]) {
+      const rows = await db.all<Record<string, unknown>>(sql, params);
+      for (const row of rows) {
         const chrome = (row.lastChrome ?? row.timeChrome) as bigint;
         merged.push({ chrome, row: toRow(row, profile) });
       }
     } finally {
-      db.close();
+      await db.close();
     }
   }
   merged.sort((a, b) => (a.chrome === b.chrome ? 0 : a.chrome < b.chrome ? 1 : -1));

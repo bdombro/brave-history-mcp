@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-11-10
+
+### Changed
+
+- Switch SQLite queries and cached `History` snapshot copies to async (`@slimr/sqlite` worker thread and `node:fs/promises`) so queries and file copies never block the gateway event loop.
+
 ## [1.0.5] - 2026-11-09
 
 ### Changed
