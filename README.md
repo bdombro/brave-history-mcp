@@ -1,63 +1,126 @@
 # brave-history
 
-Search Brave browser history (titles, URLs, visits) over MCP. Read-only.
-
-A Claude Code / Cursor plugin that runs a small MCP server (`node dist/brave-history.mjs mcp`). It reads Brave's Chromium `History` SQLite DB for every profile (`Default`, `Profile N`) on macOS.
-
-## How it reads history
-
-- Brave locks `History` while running, so the server never opens it. When the original (or its `-wal` / `-journal` sidecar) is newer than the cached copy, it copies them to `~/.local/share/brave-history/<profile>/`. It queries that copy read-only with `node:sqlite`.
-- The cache dir is created `0o700` and the copied History files `0o600` (existing ones are tightened on each run). Copies are staged in a unique `fs.mkdtemp` dir, then moved into place.
-- Returned URLs have the query string and `#fragment` removed (they often hold tokens and ids). Pass `fullUrls: true` (CLI `--fullUrls`) to keep them. Keyword matching still uses the full stored URL.
-- Brave's own files are never written. There is no index of its own and no background watcher; the copy refreshes when a command runs.
-- Times are returned as ISO 8601 in Europe/Dublin local time with an offset (e.g. `2026-07-01T13:00:00+01:00`). Date filters (`--from`, `--to`) are inclusive local days.
-- macOS: the host app (terminal, Claude Code, Cursor) needs permission to read `~/Library/Application Support/BraveSoftware/` (Full Disk Access or the app-data prompt).
-
-## Installation
-
-Requires Node >= 22.5 (for `node:sqlite`) on the host's PATH. Nothing is installed at startup.
-
-### Claude Code
-
-```bash
-/plugin marketplace add bdombro/brave-history
-/plugin install brave-history@brave-history
+```
+   .-----------------.
+  | HISTORY: FOUND! |
+  |  --->  *  <---  |
+   '----------------'
 ```
 
-### Cursor
+Use this MCP to find the page you remember from your Brave history. Search titles and URLs, filter by domain or date, and inspect visit timelines across your browser profiles.
 
-Cursor Dashboard → **Settings → Plugins → Team Marketplaces → Import**, then enter `https://github.com/bdombro/brave-history`. For a local checkout: `just plugin-cursor-upsert`.
+Brave keeps its history database busy while the browser is open. This MCP reads private snapshots instead, opens them read-only, and strips URL query strings by default to avoid exposing tokens and tracking parameters.
 
-## Commands
+## Features
 
-Each command is also an MCP tool with the same arguments. Run `brave-history <command> --help` for details. Add `--json` on the CLI for JSON output.
+- Search and browse visits across Brave profiles with domain and date filters.
+- Inspect when and how a page was visited; optionally include full URLs when needed.
+- Strictly read-only, with private snapshots that avoid locking Brave's live database.
+- Small footprint: snapshots are refreshed on demand; no background indexer or Node/V8 runtime.
 
-- `brave-history search <words...> [--domain D] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--profile P] [--limit N] [--fullUrls]`: keyword search over page titles and URLs. Every word must match (case-insensitive substring). Returns title, URL, last visit, visit count and profile, newest first.
-- `brave-history list [--domain D] [--from] [--to] [--profile] [--limit] [--fullUrls]`: recent pages, newest first.
-- `brave-history visits <url> [--prefix] [--from] [--to] [--profile] [--limit] [--fullUrls]`: every visit to one URL, or to every URL under a prefix, with time, transition type (`link`, `typed`, `reload`, …) and duration.
-- `brave-history status`: show the version.
+## `.mcp.json` Configuration
 
-`--domain amazon.com` matches `amazon.com` and its subdomains (`www.amazon.com`), not `notamazon.com`. `--limit` defaults to 25 (max 500).
+In the `assistant2` workspace, `brave-history` is mounted into the unified `dist/assistant-mcp` gateway under the `brave_` prefix (`brave_search`, `brave_list`, `brave_visits`, `brave_status`).
 
-Built-ins: `completion`, `mcp`, `version`.
+To run `brave-history` as a standalone MCP server in `.mcp.json`:
 
-### Environment overrides
-
-| Variable | Default |
-| --- | --- |
-| `BRAVE_HISTORY_ROOT` | `~/Library/Application Support/BraveSoftware/Brave-Browser` |
-| `BRAVE_HISTORY_CACHE` | `~/.local/share/brave-history` |
-| `BRAVE_HISTORY_TZ` | `Europe/Dublin` |
-
-Errors go to this plugin's Bugsink project (bugsink.btek.cc); set `BUGSINK_DSN=""` to disable.
-
-## Development
-
-```bash
-just setup
-just test            # Biome + tsc + node:test (fixture History DBs in a temp dir)
-just run search foo  # from source
-just build           # rebuild the committed dist/brave-history.mjs
+```json
+{
+  "mcpServers": {
+    "brave-history": {
+      "command": "/Users/briandombrowski/dev/bdombro/assistant/assistant2/plugins/brave-history/dist/brave-history",
+      "args": ["mcp"],
+      "env": {
+        "BRAVE_HISTORY_TZ": "Europe/Dublin"
+      }
+    }
+  }
+}
 ```
 
-Commit `dist/brave-history.mjs` with source changes. Release with `just release <major|minor|patch>`.
+## App Architecture
+
+The standalone MCP and JSON CLI are implemented in C++26 on `slimr-cpp`.
+
+```text
+plugins/brave-history/
+├── justfile                  # `just test` (ASan + UBSan) and `just build` (-O3 -flto)
+├── README.md                 # User & operator documentation
+├── AGENTS.md                 # Maintainer & AI agent conventions
+├── src/
+│   ├── schemas.hpp           # Reflected input structs (`SearchInput`, `ListInput`, `VisitsInput`, `StatusInput`)
+│   ├── time.hpp              # Chromium 1601-01-01 microsecond epoch <-> Europe/Dublin ISO-8601 & civil day bounds
+│   ├── snapshot.hpp          # Atomic `mkdtemp` staging (`0700` dir, `0600` files) and mtime-cached `History` copy
+│   ├── db.hpp                # Read-only SQLite queries (`urls`, `visits`, transition decoding, URL query stripping)
+│   ├── app.hpp               # `brave_history::make_brave_history_app()` registering all 4 tools & Bugsink DSN
+│   └── main.cpp              # Standalone CLI & stdio MCP entrypoint
+├── tests/
+│   └── test_main.cpp         # 28 test cases (103 assertions) against synthetic Chromium `History` SQLite DBs
+└── dist/
+    └── brave-history         # Standalone ARM64 release binary (~650 KB)
+```
+
+### Libraries Used
+
+- **`<slimr/mcp.hpp>` & `<slimr/reflect.hpp>`:** Typed MCP tool definitions, compile-time JSON Schema generation, and narrow JSON CLI.
+- **`<slimr/sqlite.hpp>` (`-lsqlite3`):** Read-only SQLite connection (`SQLITE_OPEN_READONLY` + `PRAGMA query_only = ON`) and statement caching.
+- **`<slimr/json.hpp>` (`glaze`):** Fast JSON serialization.
+- **`<slimr/bugsink.hpp>` (`-lcurl`):** Automatic error reporting to `bugsink.btek.cc`.
+- **`<slimr/test.hpp>` (`doctest`):** Temp-dir Chromium SQLite fixture testing with `-fsanitize=address,undefined`.
+
+## How It Reads History Safely
+
+1. **Zero locking conflict with Brave:** Brave holds an exclusive lock on its `History` SQLite database while running. `brave-history` never opens Brave's live database directly.
+2. **Atomic mtime-cached snapshots (`src/snapshot.hpp`):** Whenever a profile's `History` (or its `-wal` / `-journal` sidecar) has a newer `mtime` than the cached snapshot in `~/.local/share/brave-history/<profile>/`, it stages a copy in a `0700` temporary directory (`mkdtemp`), sets file permissions to `0600`, and moves the snapshot into place.
+3. **Read-only SQLite connections:** Queries open the cached `History` snapshot with `SQLITE_OPEN_READONLY` and `PRAGMA query_only = ON`.
+4. **Privacy-by-default URL sanitization:** Returned URLs automatically strip `?query` strings and `#fragment` identifiers (which frequently contain OAuth tokens, session IDs, or tracking parameters). Pass `"fullUrls": true` when the full query string is needed. Keyword search still matches against the full stored URL.
+5. **Chromium epoch & timezone conversion (`src/time.hpp`):** Converts Chromium's 1601-01-01 UTC microsecond timestamps to ISO-8601 strings in `Europe/Dublin` local time with UTC offset (e.g. `2026-07-01T13:00:00+01:00`). Date filters (`from`, `to`) are inclusive local calendar days (`YYYY-MM-DD`).
+
+## Tools & CLI Commands
+
+Every tool is exposed over MCP (`brave-history mcp` or via `assistant-mcp` under the `brave_` prefix) and on the CLI (`brave-history <tool> ['{"arg":"val"}']`).
+
+| Tool | Gateway Name | Description |
+| --- | --- | --- |
+| `search` | `brave_search` | Keyword search over page titles and URLs. Every word in `query` must match (case-insensitive substring). Supports `domain`, `from`, `to`, `profile`, `limit` (default 25, max 500), and `fullUrls`. Returns title, URL, last visit time, visit count, and profile, newest first. |
+| `list` | `brave_list` | List recently visited pages, newest first, with optional `domain`, `from`, `to`, `profile`, `limit`, and `fullUrls` filters. |
+| `visits` | `brave_visits` | Detailed visit log for an exact `url` (or URL prefix with `"prefix": true`), returning visit timestamp, Chromium transition type (`link`, `typed`, `reload`, `form_submit`, …), visit duration, and profile. |
+| `status` | `brave_status` | Returns plugin version, discovered profiles, and active paths. |
+
+### Domain Filtering
+
+`"domain": "amazon.co.uk"` matches both `amazon.co.uk` and any subdomain (`www.amazon.co.uk`, `smile.amazon.co.uk`), while rejecting lookalike domains (`notamazon.co.uk`).
+
+### CLI Examples
+
+```bash
+# Search history for keywords within a domain and date range
+./dist/brave-history search '{"query":["kodiaq","service"],"domain":"skoda.ie","from":"2026-01-01"}'
+
+# List 10 most recent visits across all profiles
+./dist/brave-history list '{"limit":10}'
+
+# Inspect individual visits under a URL prefix
+./dist/brave-history visits '{"url":"https://github.com/bdombro","prefix":true,"limit":20}'
+
+# Check status
+./dist/brave-history status
+```
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BRAVE_HISTORY_ROOT` | `~/Library/Application Support/BraveSoftware/Brave-Browser` | Brave user data directory containing `Default` and `Profile *` folders |
+| `BRAVE_HISTORY_CACHE` | `~/.local/share/brave-history` | Owner-only (`0700`) directory for staged `History` snapshots |
+| `BRAVE_HISTORY_TZ` | `Europe/Dublin` | IANA timezone used for local `from`/`to` day bounds and ISO-8601 output |
+| `BUGSINK_DSN` | Project DSN on `bugsink.btek.cc` | Error reporting DSN (`""` disables) |
+
+> **macOS permissions:** The host terminal or MCP client (Claude Code, Cursor, opencode) needs permission to read `~/Library/Application Support/BraveSoftware/` (granted via macOS App Data prompt or Full Disk Access).
+
+## Building & Testing
+
+```bash
+just test     # Run 28 test cases (103 assertions) against temp SQLite History fixtures with ASan + UBSan
+just build    # Build optimized ARM64 binary (-O3 -flto) at dist/brave-history
+```
