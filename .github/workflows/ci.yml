@@ -24,10 +24,6 @@ jobs:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
       BUGSINK_DSN: ""
     steps:
-      - name: Deliberate merge-gate failure
-        run: |
-          echo "::error::Intentional temporary merge-gate verification; do not merge"
-          exit 1
       - uses: actions/checkout@v4
       - name: Validate dependency revision
         env:
