@@ -4,10 +4,94 @@ Standalone C++26 MCP server and CLI for searching, listing, and inspecting Brave
 
 Each profile's `History` SQLite database is snapshotted atomically (`flock` + copy + `-wal`/`-shm` companion files into `BRAVE_HISTORY_CACHE`, refreshed when source mtime/size changes) and queried read-only without blocking Brave. Query strings and URL fragments are stripped by default unless `fullUrls: true` is passed.
 
-## Requirements
+> **Client compatibility:** MCP **2026-07-28 only**; legacy clients cannot connect.
+> The workspace has been exercised with OpenCode v2.2.6 using explicit July
+> configuration. Cursor's July support is deferred; Claude Code July runtime
+> acceptance is not yet verified. Shipping a plugin manifest is not proof of
+> client compatibility.
 
-- macOS or Linux with Brave Browser desktop profiles installed
-- C++26 toolchain, CMake, Ninja, `vcpkg`, and Node.js (for `just test-mcp`)
+## Try It
+
+After setup, ask your agent:
+
+> Find the pages I visited about Kodiaq servicing last week.
+
+## Features
+
+- Search page titles/URLs, list recent pages and inspect visit history.
+- Read atomic snapshots without modifying Brave's live history.
+- Hide URL queries and fragments by default; opt in explicitly to full URLs.
+
+
+## Installation
+
+- **Prebuilt release:** the checked-in [Homebrew formula](Formula/brave-history-mcp.rb)
+  currently has a placeholder checksum. It is not a ready-to-install release.
+  Check [releases](https://github.com/bdombro/brave-history-mcp/releases) for published
+  binaries and a finalized formula before using a release installation command.
+- **Build from source:** the current path is [Development](#development).
+  Local slimr overlays are for development, not a runtime requirement.
+- **Already installed:** follow the setup and service steps below. Installing a
+  Cursor/Claude manifest only configures an endpoint; it does not install or
+  start the native service.
+
+
+## Configure Brave Access
+
+Install Brave if needed with `brew install --cask brave-browser`.
+The server uses the default Brave desktop profile location; override it with
+`BRAVE_HISTORY_ROOT` when needed. macOS privacy controls may require App Data
+or Full Disk Access for the terminal or service binary reading your profile.
+Grant only the access needed for your chosen deployment.
+
+
+## Start and Manage the Service
+
+For an already-installed Homebrew formula:
+
+```bash
+brew services start bdombro/brave-history-mcp/brave-history-mcp
+brew services info brave-history-mcp
+brew services restart bdombro/brave-history-mcp/brave-history-mcp
+brew services stop bdombro/brave-history-mcp/brave-history-mcp
+```
+
+The endpoint is `http://127.0.0.1:8083/mcp`; logs are under
+`/opt/homebrew/var/log/`. To run in the foreground instead, use
+`brave-history-mcp http` (or `./build/bin/brave-history-mcp http` from a source checkout).
+Do not run the foreground server and service on the same port.
+Keep the default loopback bind; this is not a shared remote-host deployment.
+
+
+## Connect Your Agent
+
+After starting the service, add this server to OpenCode v2.2.6's
+`opencode.jsonc` (merge it with any existing servers):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "brave-history-mcp": {
+        "type": "remote",
+        "url": "http://127.0.0.1:8083/mcp",
+        "protocol": "2026-07-28"
+      }
+    }
+  }
+}
+```
+
+Use either an explicit server entry or a plugin manifest, not both.
+Alternative client schemas and stdio configuration are in the
+[developer reference](docs/development.md). The compatibility notice above
+applies to every transport.
+
+
+## Runtime Requirements
+
+- Brave Browser desktop profiles installed. macOS is the verified host;
+  Linux support remains unverified.
 
 On macOS, reading `~/Library/Application Support/BraveSoftware/Brave-Browser/` from a terminal or background `launchd` service (`brew services`) requires **App Data** / **Full Disk Access** permission for the terminal or `brave-history-mcp` binary if protected by macOS privacy controls.
 
@@ -17,68 +101,6 @@ On macOS, reading `~/Library/Application Support/BraveSoftware/Brave-Browser/` f
 - `list` — List recently visited pages in reverse chronological order, optionally bounded by `from` / `to`
 - `visits` — List individual visits for a specific URL (stripping `?query` and `#fragment` automatically when querying and displaying, unless `fullUrls: true`)
 - `status` — Show app version
-
-## Transports & July `2026-07-28` MCP Breaking Change
-
-`brave-history-mcp` supports:
-
-- **Streamable HTTP** (recommended for IDE/agent clients): `brave-history-mcp http` (default `http://127.0.0.1:8083/mcp`, loopback-only unless `--allow-non-loopback`, fixed port `8083` unless `--allow-ephemeral-port`)
-- **Stdio MCP**: `brave-history-mcp mcp` (newline-delimited JSON-RPC over stdin/stdout)
-- **Direct CLI**: `brave-history-mcp <tool> ['{"arg":"val"}']` (defaults to `{}`)
-
-This server targets **MCP protocol version `2026-07-28`**:
-
-- Legacy `initialize` is removed and returns JSON-RPC error `-32601` (HTTP `404`).
-- Clients must send `_meta["io.modelcontextprotocol/protocolVersion"] = "2026-07-28"` and `_meta["io.modelcontextprotocol/clientCapabilities"]` in `params`, and use `server/discover` instead of `initialize`.
-- Streamable HTTP `POST /mcp` requests must include `Host` (loopback), `Accept: application/json, text/event-stream`, `Content-Type: application/json`, `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method: <method>`, and `Mcp-Name: <tool>` on `tools/call`.
-
-## Client Configuration
-
-### Cursor / Claude Code (Streamable HTTP)
-
-Point MCP clients at the local service endpoint:
-
-```json
-{
-  "mcpServers": {
-    "brave-history": {
-      "url": "http://127.0.0.1:8083/mcp"
-    }
-  }
-}
-```
-
-### Stdio
-
-```json
-{
-  "mcpServers": {
-    "brave-history": {
-      "command": "brave-history-mcp",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Plugin Manifests
-
-Preconfigured HTTP plugin manifests targeting `http://127.0.0.1:8083/mcp` live under:
-
-- `.cursor-plugin/plugin.json`
-- `.claude-plugin/plugin.json`
-- `.claude-plugin/marketplace.json`
-
-## Homebrew & Background Service (`127.0.0.1:8083`)
-
-`Formula/brave-history-mcp.rb` builds and installs `brave-history-mcp` natively with CMake, Ninja, and `vcpkg`, and registers a `launchd` / `brew services` unit running `brave-history-mcp http --host 127.0.0.1 --port 8083` (`keep_alive true`, logs in `$(brew --prefix)/var/log/brave-history-mcp.log`).
-
-Local lifecycle recipes in `justfile`:
-
-- `just install` — Install from the formula
-- `just install-local` / `just reinstall-local` — Stage and install from the local checkout via `scripts/dev-formula.sh` (restoring the formula on failure)
-- `just start` / `just stop` / `just restart` / `just status` — Manage `brew services`
-- `just uninstall` — Stop the service and uninstall
 
 ## CLI Usage
 
@@ -99,6 +121,35 @@ brave-history-mcp mcp
 | `BRAVE_HISTORY_CACHE` | OS cache dir + `/brave-history-mcp` | Override atomic snapshot cache directory |
 | `TZ` | System timezone | Override timezone used for timestamp formatting and date queries |
 | `BUGSINK_DSN` | Unset (disabled) | Optional error reporting endpoint |
+
+## Troubleshooting
+
+- **Client cannot connect:** confirm it supports July MCP, the service is
+  running, and the client URL matches the configured port. OpenCode needs
+  `"protocol": "2026-07-28"`; old `initialize` clients will fail.
+- **Port occupied:** inspect the listener and stop only the service/process
+  you own, or deliberately choose another port and update the client URL.
+- **Works in a terminal, not as a service:** launchd does not inherit
+  `~/.zshrc`. Configure the service environment separately or use the
+  plugin's supported private configuration file; inspect
+  `/opt/homebrew/var/log/` for errors.
+- **History unavailable:** check the Brave profile path and macOS privacy permissions; do not copy or modify the live database manually.
+- **Source build cannot find vcpkg or slimr ports:** load the development
+  environment, bootstrap vcpkg, and register both slimr links and the pinned
+  libhv overlay. Never repair this by editing installed headers.
+- **Compiler/hardening check fails:** upgrade the Xcode toolchain; set
+  `CXX` before first configure. CMake caches the compiler, so an intentional
+  compiler change needs a fresh configuration tree.
+
+
+## Development
+
+This section is for building or changing the server, not configuring an
+installed binary. [Architecture, transport reference and test details](docs/development.md)
+are separate from the user setup flow.
+
+<details>
+<summary>macOS source-build setup (vcpkg and local slimr overlays)</summary>
 
 ## macOS Build Prerequisites (vcpkg setup)
 
@@ -167,11 +218,14 @@ For live history, install Brave separately with `brew install --cask brave-brows
 and grant the permissions described above. Tests use synthetic history and
 these commands do not start services or access your live browser profile.
 
-## Build & Test
+</details>
 
-```sh
-just test       # Debug + ASan/UBSan unit, HTTP, CLI & concurrency tests
-just build      # Release build (-O3 -flto) -> build/bin/brave-history-mcp
-just lint       # clang-tidy (${CLANG_TIDY:-clang-tidy})
-just test-mcp   # MCP 2026-07-28 stdio + ephemeral HTTP conformance test
+After the source build succeeds, stage and install the local Homebrew formula:
+
+```bash
+just install-local
 ```
+
+Installing a formula and starting its service are separate actions.
+For a source-only foreground run, use
+`./build/bin/brave-history-mcp http`.

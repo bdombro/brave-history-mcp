@@ -4,6 +4,14 @@ Guidance for AI agents working in `brave-history-mcp`.
 
 > Keep this file in sync with code, tooling, and conventions.
 
+
+## Documentation Upkeep
+
+When a change conflicts with `README.md`, update the affected README and its
+linked user/developer documentation in the same change. Keep examples,
+configuration, install/build commands and compatibility claims consistent
+with implemented behavior; do not claim unverified release or client support.
+
 ## Architecture
 
 - Standalone C++26 MCP server and CLI built on `slimr-mcp[http]`, `slimr-sqlite`, `slimr-json`, `slimr-reflect`, `slimr-time`, `slimr-bugsink`, and `slimr-test`.
