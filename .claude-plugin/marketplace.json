@@ -1,0 +1,13 @@
+{
+  "name": "brave-history-mcp",
+  "owner": {
+    "name": "Brian Dombrowski"
+  },
+  "plugins": [
+    {
+      "name": "brave-history-mcp",
+      "source": ".",
+      "description": "Search Brave browser history (titles, URLs, visits) over MCP"
+    }
+  ]
+}

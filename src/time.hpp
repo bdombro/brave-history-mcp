@@ -22,14 +22,23 @@ inline int64_t unixMsToChromeMicros(int64_t unixMs) {
     return unixMs * 1000LL + CHROME_EPOCH_OFFSET_MICROS;
 }
 
+namespace detail {
+
+inline std::mutex g_tz_mutex;
+
+} // namespace detail
+
+inline std::mutex& env_mutex() {
+    return detail::g_tz_mutex;
+}
+
 inline std::string timeZone() {
+    std::lock_guard<std::mutex> lock(env_mutex());
     const char* env = std::getenv("BRAVE_HISTORY_TZ");
     return (env && *env) ? std::string(env) : DEFAULT_TIME_ZONE;
 }
 
 namespace detail {
-
-inline std::mutex g_tz_mutex;
 
 struct TzGuard {
     std::string old_tz;

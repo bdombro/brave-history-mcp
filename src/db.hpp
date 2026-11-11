@@ -131,9 +131,9 @@ inline std::vector<T> acrossProfiles(
     std::vector<MergedItem> merged;
 
     for (const auto& profile : selectProfiles(profileFilter)) {
-        std::string cachedPath = ensureCachedHistory(profile);
-        slimr::SqliteDb db(cachedPath, slimr::SqliteOptions{.readOnly = true});
-        auto rows = db.all<slimr::Json>(sql, params);
+        const std::vector<slimr::Json> rows = withCachedHistoryDb(profile, [&](slimr::SqliteDb& db) {
+            return db.all<slimr::Json>(sql, params);
+        });
         for (const auto& row : rows) {
             int64_t chrome = 0;
             if (row.contains("lastChrome") && !row["lastChrome"].is_null()) {

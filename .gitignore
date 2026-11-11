@@ -1,6 +1,7 @@
 build/
 bin/
 dist/
+Formula/.staging/
 *.o
 *.dSYM/
 .DS_Store

@@ -90,6 +90,7 @@ inline slimr::PluginApp make_brave_history_app() {
     app.tool<StatusInput>(
         "status",
         "Show app version.",
+        slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
         [](const StatusInput&) -> StatusOutput {
             return StatusOutput{.version = "2.0.0"};
         }

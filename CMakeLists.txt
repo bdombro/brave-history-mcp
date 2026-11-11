@@ -46,7 +46,7 @@ endif()
 
 add_executable(brave-history-mcp src/main.cpp)
 target_include_directories(brave-history-mcp PRIVATE src)
-target_link_libraries(brave-history-mcp PRIVATE slimr::mcp slimr::sqlite app_options)
+target_link_libraries(brave-history-mcp PRIVATE slimr::mcp_http slimr::sqlite app_options)
 set_target_properties(brave-history-mcp PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/build/bin")
@@ -56,7 +56,7 @@ if(BUILD_TESTING)
     add_executable(brave_history_test tests/test_main.cpp)
     target_include_directories(brave_history_test PRIVATE src)
     target_link_libraries(brave_history_test PRIVATE
-        slimr::mcp slimr::sqlite slimr::test app_options)
+        slimr::mcp_http slimr::sqlite slimr::test app_options)
     set_target_properties(brave_history_test PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
     add_test(NAME brave_history COMMAND brave_history_test)
     set_tests_properties(brave_history PROPERTIES TIMEOUT 120 ENVIRONMENT "BUGSINK_DSN=")

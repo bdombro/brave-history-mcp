@@ -3,14 +3,24 @@
 
 #include "app.hpp"
 #include "fixture.hpp"
+#include "mcp_http.hpp"
 #include "schemas.hpp"
 #include "snapshot.hpp"
 #include "time.hpp"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
+#include <atomic>
+#include <cstring>
 #include <filesystem>
+#include <iostream>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace brave_history;
@@ -500,6 +510,93 @@ TEST_SUITE("queryPages and queryVisits") {
     }
 }
 
+namespace {
+
+slimr::Json make_mcp_request(int id, std::string_view method, slimr::Json params = slimr::json_obj()) {
+    slimr::Json meta = slimr::json_obj();
+    meta["io.modelcontextprotocol/protocolVersion"] = std::string(slimr::kMcpProtocolVersion);
+    meta["io.modelcontextprotocol/clientCapabilities"] = slimr::json_obj();
+    params["_meta"] = std::move(meta);
+    slimr::Json req = slimr::json_obj();
+    req["jsonrpc"] = "2.0";
+    req["id"] = id;
+    req["method"] = std::string(method);
+    req["params"] = std::move(params);
+    return req;
+}
+
+slimr::Json make_tool_call(int id, std::string_view name, slimr::Json arguments) {
+    slimr::Json params = slimr::json_obj();
+    params["name"] = std::string(name);
+    params["arguments"] = std::move(arguments);
+    return make_mcp_request(id, "tools/call", std::move(params));
+}
+
+struct TcpFd {
+    int fd = -1;
+    TcpFd() = default;
+    explicit TcpFd(int f) : fd(f) {}
+    ~TcpFd() {
+        if (fd >= 0) ::close(fd);
+    }
+    TcpFd(const TcpFd&) = delete;
+    TcpFd& operator=(const TcpFd&) = delete;
+};
+
+struct HttpResponse {
+    int status = 0;
+    std::string body;
+};
+
+HttpResponse http_post_mcp(uint16_t port, std::string_view method, std::string_view mcpName, const slimr::Json& req) {
+    TcpFd sock(::socket(AF_INET, SOCK_STREAM, 0));
+    if (sock.fd < 0) return {};
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1) return {};
+    if (::connect(sock.fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return {};
+
+    const std::string bodyStr = slimr::to_json(req);
+    std::ostringstream os;
+    os << "POST /mcp HTTP/1.1\r\n"
+       << "Host: 127.0.0.1:" << port << "\r\n"
+       << "Connection: close\r\n"
+       << "Content-Type: application/json\r\n"
+       << "Accept: application/json, text/event-stream\r\n"
+       << "MCP-Protocol-Version: " << slimr::kMcpProtocolVersion << "\r\n"
+       << "Mcp-Method: " << method << "\r\n";
+    if (!mcpName.empty()) {
+        os << "Mcp-Name: " << mcpName << "\r\n";
+    }
+    os << "Content-Length: " << bodyStr.size() << "\r\n\r\n" << bodyStr;
+    const std::string rawReq = os.str();
+
+    size_t sent = 0;
+    while (sent < rawReq.size()) {
+        const ssize_t n = ::send(sock.fd, rawReq.data() + sent, rawReq.size() - sent, 0);
+        if (n <= 0) return {};
+        sent += static_cast<size_t>(n);
+    }
+
+    std::string rawResp;
+    char buf[4096]{};
+    for (;;) {
+        const ssize_t n = ::recv(sock.fd, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        rawResp.append(buf, static_cast<size_t>(n));
+    }
+    const auto hdrEnd = rawResp.find("\r\n\r\n");
+    if (hdrEnd == std::string::npos) return {};
+    const std::string hdrs = rawResp.substr(0, hdrEnd);
+    const auto sp1 = hdrs.find(' ');
+    const int status = sp1 == std::string::npos ? 0 : static_cast<int>(std::strtol(hdrs.c_str() + sp1 + 1, nullptr, 10));
+    return {status, rawResp.substr(hdrEnd + 4)};
+}
+
+}  // namespace
+
 // ============================================================================
 // 6. App level & URL stripping tests
 // ============================================================================
@@ -522,14 +619,9 @@ TEST_SUITE("app and URL stripping") {
         });
         auto app = make_brave_history_app();
 
-        slimr::Json req = slimr::Json::object_t{};
-        req["jsonrpc"] = "2.0";
-        req["id"] = 100;
-        req["method"] = "tools/call";
-        req["params"]["name"] = "search";
-        req["params"]["arguments"] = slimr::Json::object_t{
+        const slimr::Json req = make_tool_call(100, "search", slimr::Json::object_t{
             {"words", slimr::Json::array_t{"standing", "desk"}},
-        };
+        });
 
         slimr::Json resp = app.dispatchMcpJson(req);
         CHECK(resp["result"]["isError"].get<bool>() == false);
@@ -558,12 +650,7 @@ TEST_SUITE("app and URL stripping") {
 
         // 1. search
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 101;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "search";
-            req["params"]["arguments"] = slimr::Json::object_t{{"words", slimr::Json::array_t{"desk"}}};
+            const auto req = make_tool_call(101, "search", slimr::Json::object_t{{"words", slimr::Json::array_t{"desk"}}});
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["pages"][0]["url"].get<std::string>() == "https://example.com/desk");
@@ -571,12 +658,7 @@ TEST_SUITE("app and URL stripping") {
 
         // 2. list
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 102;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "list";
-            req["params"]["arguments"] = slimr::Json::object_t{};
+            const auto req = make_tool_call(102, "list", slimr::Json::object_t{});
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["pages"][0]["url"].get<std::string>() == "https://example.com/desk");
@@ -584,12 +666,7 @@ TEST_SUITE("app and URL stripping") {
 
         // 3. visits
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 103;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "visits";
-            req["params"]["arguments"] = slimr::Json::object_t{{"url", FULL}};
+            const auto req = make_tool_call(103, "visits", slimr::Json::object_t{{"url", FULL}});
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["visits"][0]["url"].get<std::string>() == "https://example.com/desk");
@@ -607,15 +684,10 @@ TEST_SUITE("app and URL stripping") {
 
         // 1. search with fullUrls: true
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 201;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "search";
-            req["params"]["arguments"] = slimr::Json::object_t{
+            const auto req = make_tool_call(201, "search", slimr::Json::object_t{
                 {"words", slimr::Json::array_t{"desk"}},
                 {"fullUrls", true},
-            };
+            });
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["pages"][0]["url"].get<std::string>() == FULL);
@@ -623,14 +695,9 @@ TEST_SUITE("app and URL stripping") {
 
         // 2. list with fullUrls: true
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 202;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "list";
-            req["params"]["arguments"] = slimr::Json::object_t{
+            const auto req = make_tool_call(202, "list", slimr::Json::object_t{
                 {"fullUrls", true},
-            };
+            });
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["pages"][0]["url"].get<std::string>() == FULL);
@@ -638,18 +705,198 @@ TEST_SUITE("app and URL stripping") {
 
         // 3. visits with fullUrls: true
         {
-            slimr::Json req = slimr::Json::object_t{};
-            req["jsonrpc"] = "2.0";
-            req["id"] = 203;
-            req["method"] = "tools/call";
-            req["params"]["name"] = "visits";
-            req["params"]["arguments"] = slimr::Json::object_t{
+            const auto req = make_tool_call(203, "visits", slimr::Json::object_t{
                 {"url", FULL},
                 {"fullUrls", true},
-            };
+            });
             auto resp = app.dispatchMcpJson(req);
             auto parsed = slimr::parse_json<slimr::Json>(resp["result"]["content"][0]["text"].get<std::string>());
             CHECK((*parsed)["visits"][0]["url"].get<std::string>() == FULL);
         }
+    }
+}
+
+// ============================================================================
+// 7. MCP 2026-07-28, Streamable HTTP, CLI & Concurrency tests
+// ============================================================================
+TEST_SUITE("mcp 2026-07-28, http and concurrency") {
+    TEST_CASE("dispatchMcpJson serves 2026-07-28 discovery and rejects legacy initialize") {
+        auto app = make_brave_history_app();
+
+        const auto initResp = app.dispatchMcpJson(make_mcp_request(1, "initialize"));
+        CHECK(initResp["error"]["code"].get<int64_t>() == static_cast<int64_t>(slimr::McpErrorCode::MethodNotFound));
+
+        const auto discResp = app.dispatchMcpJson(make_mcp_request(2, "server/discover"));
+        CHECK(discResp["result"]["supportedVersions"][0].get<std::string>() == slimr::kMcpProtocolVersion);
+        CHECK(discResp["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].get<std::string>() == "brave-history-mcp");
+
+        const auto listResp = app.dispatchMcpJson(make_mcp_request(3, "tools/list"));
+        CHECK(listResp["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
+    }
+
+    TEST_CASE("http security invariants and CLI behavior") {
+        auto fixture = createFixture({
+            {"Default", {
+                {.url = "https://example.com/status-check", .title = "Status Page", .visits = {{.at = "2026-03-01T10:00:00Z"}}},
+            }},
+        });
+        auto app = make_brave_history_app();
+
+        slimr::HttpServerOptions nonLoopback;
+        nonLoopback.host = "0.0.0.0";
+        nonLoopback.port = 0;
+        nonLoopback.allowEphemeralPort = true;
+        slimr::McpHttpServer badHost(app, nonLoopback);
+        std::string err;
+        CHECK(badHost.start(&err) == false);
+        CHECK(err.find("Non-loopback") != std::string::npos);
+
+        slimr::HttpServerOptions unflaggedEphemeral;
+        unflaggedEphemeral.host = "127.0.0.1";
+        unflaggedEphemeral.port = 0;
+        slimr::McpHttpServer badPort(app, unflaggedEphemeral);
+        CHECK(badPort.start(&err) == false);
+
+        slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 8083});
+        char a0[] = "brave-history-mcp";
+        char a1[] = "http";
+        char a2[] = "--host";
+        char a3[] = "0.0.0.0";
+        char* badArgv[] = {a0, a1, a2, a3, nullptr};
+        CHECK(app.run(4, badArgv) == 1);
+
+        char s1[] = "status";
+        char* statusArgv[] = {a0, s1, nullptr};
+        std::stringstream ss;
+        auto* oldOut = std::cout.rdbuf(ss.rdbuf());
+        const int rc = app.run(2, statusArgv);
+        std::cout.rdbuf(oldOut);
+        CHECK(rc == 0);
+        auto parsedStatus = slimr::parse_json<slimr::Json>(ss.str());
+        REQUIRE(parsedStatus.has_value());
+        CHECK((*parsedStatus)["version"].get<std::string>() == "2.0.0");
+    }
+
+    TEST_CASE("ephemeral Streamable HTTP server serves discovery, tools and concurrent reads") {
+        auto fixture = createFixture({
+            {"Default", {
+                {.url = "https://example.com/desk", .title = "Standing desk", .visits = {{.at = "2026-03-01T10:00:00Z"}}},
+                {.url = "https://example.com/chair", .title = "Ergonomic chair", .visits = {{.at = "2026-03-02T11:00:00Z"}}},
+            }},
+        });
+        auto app = make_brave_history_app();
+
+        slimr::HttpServerOptions opts;
+        opts.host = "127.0.0.1";
+        opts.port = 0;
+        opts.allowEphemeralPort = true;
+        slimr::McpHttpServer srv(app, opts);
+        std::string err;
+        REQUIRE(srv.start(&err));
+        const uint16_t port = srv.boundPort();
+        REQUIRE(port != 0);
+
+        struct ServerStop {
+            slimr::McpHttpServer& server;
+            ~ServerStop() { server.stop(); }
+        } stopGuard{srv};
+
+        // 1. Legacy initialize returns HTTP 404 / JSON-RPC -32601
+        {
+            const auto resp = http_post_mcp(port, "initialize", "", make_mcp_request(10, "initialize"));
+            CHECK(resp.status == 404);
+            auto j = slimr::parse_json<slimr::Json>(resp.body);
+            REQUIRE(j.has_value());
+            CHECK((*j)["error"]["code"].get<int64_t>() == static_cast<int64_t>(slimr::McpErrorCode::MethodNotFound));
+        }
+
+        // 2. server/discover
+        {
+            const auto resp = http_post_mcp(port, "server/discover", "", make_mcp_request(11, "server/discover"));
+            CHECK(resp.status == 200);
+            auto j = slimr::parse_json<slimr::Json>(resp.body);
+            REQUIRE(j.has_value());
+            CHECK((*j)["result"]["supportedVersions"][0].get<std::string>() == slimr::kMcpProtocolVersion);
+            CHECK((*j)["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].get<std::string>() == "brave-history-mcp");
+        }
+
+        // 3. tools/list
+        {
+            const auto resp = http_post_mcp(port, "tools/list", "", make_mcp_request(12, "tools/list"));
+            CHECK(resp.status == 200);
+            auto j = slimr::parse_json<slimr::Json>(resp.body);
+            REQUIRE(j.has_value());
+            CHECK((*j)["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
+        }
+
+        // 4. search, list, visits, status over HTTP
+        {
+            const auto sResp = http_post_mcp(
+                port, "tools/call", "search",
+                make_tool_call(13, "search", slimr::Json::object_t{{"words", slimr::Json::array_t{"standing"}}})
+            );
+            CHECK(sResp.status == 200);
+            auto sj = slimr::parse_json<slimr::Json>(sResp.body);
+            REQUIRE(sj.has_value());
+            CHECK((*sj)["result"]["isError"].get<bool>() == false);
+            auto parsed = slimr::parse_json<slimr::Json>((*sj)["result"]["content"][0]["text"].get<std::string>());
+            REQUIRE(parsed.has_value());
+            CHECK((*parsed)["pages"].get<slimr::Json::array_t>().size() == 1);
+
+            const auto lResp = http_post_mcp(
+                port, "tools/call", "list",
+                make_tool_call(14, "list", slimr::Json::object_t{})
+            );
+            CHECK(lResp.status == 200);
+            auto lj = slimr::parse_json<slimr::Json>(lResp.body);
+            REQUIRE(lj.has_value());
+            auto lParsed = slimr::parse_json<slimr::Json>((*lj)["result"]["content"][0]["text"].get<std::string>());
+            REQUIRE(lParsed.has_value());
+            CHECK((*lParsed)["pages"].get<slimr::Json::array_t>().size() == 2);
+
+            const auto vResp = http_post_mcp(
+                port, "tools/call", "visits",
+                make_tool_call(15, "visits", slimr::Json::object_t{{"url", "https://example.com/desk"}})
+            );
+            CHECK(vResp.status == 200);
+            auto vj = slimr::parse_json<slimr::Json>(vResp.body);
+            REQUIRE(vj.has_value());
+            auto vParsed = slimr::parse_json<slimr::Json>((*vj)["result"]["content"][0]["text"].get<std::string>());
+            REQUIRE(vParsed.has_value());
+            CHECK((*vParsed)["visits"].get<slimr::Json::array_t>().size() == 1);
+
+            const auto stResp = http_post_mcp(
+                port, "tools/call", "status",
+                make_tool_call(16, "status", slimr::Json::object_t{})
+            );
+            CHECK(stResp.status == 200);
+            auto stj = slimr::parse_json<slimr::Json>(stResp.body);
+            REQUIRE(stj.has_value());
+            CHECK((*stj)["result"]["isError"].get<bool>() == false);
+        }
+
+        // 5. Concurrent HTTP callers across threads
+        std::atomic<int> failures{0};
+        std::vector<std::thread> workers;
+        for (int t = 0; t < 4; ++t) {
+            workers.emplace_back([&, t]() {
+                for (int i = 0; i < 5; ++i) {
+                    const auto r = http_post_mcp(
+                        port, "tools/call", "search",
+                        make_tool_call(100 + t * 10 + i, "search", slimr::Json::object_t{{"words", slimr::Json::array_t{"desk"}}})
+                    );
+                    if (r.status != 200) {
+                        failures.fetch_add(1);
+                        continue;
+                    }
+                    auto j = slimr::parse_json<slimr::Json>(r.body);
+                    if (!j || (*j)["result"]["isError"].get<bool>()) {
+                        failures.fetch_add(1);
+                    }
+                }
+            });
+        }
+        for (auto& w : workers) w.join();
+        CHECK(failures.load() == 0);
     }
 }

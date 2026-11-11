@@ -2,6 +2,7 @@
 
 #include "json.hpp"
 #include "sqlite.hpp"
+#include "time.hpp"
 
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -13,13 +14,20 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace brave_history {
+
+inline std::shared_mutex& cache_mutex() {
+    static std::shared_mutex m;
+    return m;
+}
 
 struct BraveProfile {
     std::string dir;
@@ -29,6 +37,7 @@ struct BraveProfile {
 };
 
 inline std::string braveRoot() {
+    std::lock_guard<std::mutex> lock(env_mutex());
     const char* env = std::getenv("BRAVE_HISTORY_ROOT");
     if (env && *env) return std::string(env);
     const char* home = std::getenv("HOME");
@@ -37,6 +46,7 @@ inline std::string braveRoot() {
 }
 
 inline std::string cacheRoot() {
+    std::lock_guard<std::mutex> lock(env_mutex());
     const char* env = std::getenv("BRAVE_HISTORY_CACHE");
     if (env && *env) return std::string(env);
     const char* home = std::getenv("HOME");
@@ -174,7 +184,7 @@ inline std::vector<BraveProfile> selectProfiles(const std::optional<std::string>
     return matched;
 }
 
-inline std::string ensureCachedHistory(const BraveProfile& profile) {
+inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
     std::filesystem::path root = std::filesystem::absolute(braveRoot()).lexically_normal();
     std::filesystem::path cacheDir = std::filesystem::absolute(std::filesystem::path(cacheRoot()) / profile.dir).lexically_normal();
 
@@ -255,6 +265,23 @@ inline std::string ensureCachedHistory(const BraveProfile& profile) {
         std::filesystem::remove_all(staging, ec);
         throw;
     }
+}
+
+inline std::string ensureCachedHistory(const BraveProfile& profile) {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex());
+    return ensure_cached_history_locked(profile);
+}
+
+template <typename Fn>
+inline auto withCachedHistoryDb(const BraveProfile& profile, Fn&& fn) {
+    std::string cachedPath;
+    {
+        std::unique_lock<std::shared_mutex> writeLock(cache_mutex());
+        cachedPath = ensure_cached_history_locked(profile);
+    }
+    std::shared_lock<std::shared_mutex> readLock(cache_mutex());
+    slimr::SqliteDb db(cachedPath, slimr::SqliteOptions{.readOnly = true});
+    return fn(db);
 }
 
 } // namespace brave_history

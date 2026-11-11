@@ -1,0 +1,16 @@
+{
+  "name": "brave-history-mcp",
+  "version": "2.0.0",
+  "description": "Search Brave browser history (titles, URLs, visits) over MCP",
+  "author": {
+    "name": "Brian Dombrowski"
+  },
+  "homepage": "https://github.com/bdombro/brave-history-mcp",
+  "repository": "https://github.com/bdombro/brave-history-mcp",
+  "mcpServers": {
+    "brave-history-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8083/mcp"
+    }
+  }
+}
