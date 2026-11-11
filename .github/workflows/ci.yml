@@ -49,11 +49,14 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 install -y clang-21 clang-tidy-21 libc++-21-dev libc++abi-21-dev lld-21 ninja-build zsh pkg-config autoconf automake libtool
           cmake --version
           mkdir -p "$RUNNER_TEMP/tools"
-          ln -s /usr/bin/clang++-21 "$RUNNER_TEMP/tools/clang++"
           ln -s /usr/bin/clang-tidy-21 "$RUNNER_TEMP/tools/clang-tidy"
           echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
-          echo 'CXXFLAGS=-stdlib=libc++' >> "$GITHUB_ENV"
-          echo 'LDFLAGS=-fuse-ld=lld-21' >> "$GITHUB_ENV"
+          {
+            echo 'CC=/usr/bin/clang-21'
+            echo 'CXX=/usr/bin/clang++-21'
+            echo 'CXXFLAGS=-stdlib=libc++'
+            echo 'LDFLAGS=-fuse-ld=lld-21'
+          } >> "$GITHUB_ENV"
       - uses: extractions/setup-just@v3
         with:
           just-version: "1.59.0"
@@ -79,3 +82,13 @@ jobs:
       - run: just build
       - run: just lint
       - run: just test-mcp
+      - name: Compiler detection failure details
+        if: failure() && runner.os == 'Linux'
+        run: |
+          if test -d "$VCPKG_ROOT/buildtrees/detect_compiler"; then
+            "$CC" --version
+            "$CXX" --version
+            find "$VCPKG_ROOT/buildtrees/detect_compiler" -maxdepth 1 -name 'config-*-err.log' -exec cat {} +
+          else
+            echo "::notice::Compiler detection did not run"
+          fi
