@@ -3,7 +3,7 @@
 #include "schemas.hpp"
 #include "snapshot.hpp"
 #include "time.hpp"
-#include "slimr/sqlite.hpp"
+#include "sqlite.hpp"
 
 #include <algorithm>
 #include <cctype>

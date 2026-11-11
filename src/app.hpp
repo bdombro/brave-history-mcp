@@ -2,19 +2,19 @@
 
 #include "db.hpp"
 #include "schemas.hpp"
-#include "slimr/mcp.hpp"
+#include "mcp.hpp"
 
 #include <stdexcept>
 
 namespace brave_history {
 
 inline slimr::PluginApp make_brave_history_app() {
-    slimr::PluginApp app("brave-history", "2.0.0");
+    slimr::PluginApp app("brave-history-mcp", "2.0.0");
     app.description = "Search Brave browser history (titles, URLs, visits) over MCP.";
     app.instructions =
-        "Brian's Brave browser history (read-only). Use it to recall sites, products, articles, or docs he looked at: "
+        "Your Brave browser history (read-only). Use it to recall sites, products, articles, or docs you looked at: "
         "search by keywords, list recent pages by domain/date, or get every visit to a URL.";
-    app.setBugsink("https://b6c38ca7c9f14e9ba4157d7b6ac46dbc@bugsink.btek.cc/5");
+    app.setBugsink("");
 
     app.tool<SearchInput>(
         "search",

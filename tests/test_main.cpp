@@ -1,5 +1,5 @@
 #define SLIMR_TEST_MAIN
-#include "slimr/test.hpp"
+#include "test.hpp"
 
 #include "app.hpp"
 #include "fixture.hpp"

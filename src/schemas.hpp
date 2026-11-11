@@ -1,6 +1,6 @@
 #pragma once
 
-#include "slimr/reflect.hpp"
+#include "reflect.hpp"
 
 #include <optional>
 #include <string>

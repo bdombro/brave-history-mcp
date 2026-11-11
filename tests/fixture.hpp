@@ -2,8 +2,8 @@
 
 #include "snapshot.hpp"
 #include "time.hpp"
-#include "slimr/sqlite.hpp"
-#include "slimr/test.hpp"
+#include "sqlite.hpp"
+#include "test.hpp"
 
 #include <sys/stat.h>
 #include <sys/time.h>

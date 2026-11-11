@@ -1,7 +1,7 @@
 #pragma once
 
-#include "slimr/json.hpp"
-#include "slimr/sqlite.hpp"
+#include "json.hpp"
+#include "sqlite.hpp"
 
 #include <sys/stat.h>
 #include <sys/time.h>

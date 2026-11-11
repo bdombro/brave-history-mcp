@@ -1,5 +1,7 @@
+build/
 bin/
 dist/
 *.o
 *.dSYM/
 .DS_Store
+/.ci/
