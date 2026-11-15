@@ -757,7 +757,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         slimr::McpHttpServer badPort(app, unflaggedEphemeral);
         CHECK(badPort.start(&err) == false);
 
-        slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 8083});
+        slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 10003});
         char a0[] = "brave-history-mcp";
         char a1[] = "http";
         char a2[] = "--host";

@@ -16,7 +16,7 @@ with implemented behavior; do not claim unverified release or client support.
 
 - Standalone C++26 MCP server and CLI built on `slimr-mcp[http]`, `slimr-sqlite`, `slimr-json`, `slimr-reflect`, `slimr-time`, `slimr-bugsink`, and `slimr-test`.
 - `src/app.hpp` defines `make_brave_history_app()` returning `slimr::PluginApp` with `search`, `list`, `visits`, and `status` tools.
-- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 8083})` and dispatches `app.run(argc, argv)`.
+- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 10003})` and dispatches `app.run(argc, argv)`.
 - `src/snapshot.hpp`, `src/db.hpp`, and `src/time.hpp` implement atomic `flock` SQLite snapshotting and thread-safe snapshot/env access (`cache_mutex()`, `env_mutex()`, `withCachedHistoryDb()`).
 - `tests/test_main.cpp` and `tests/fixture.hpp` run unit, MCP `2026-07-28`, Streamable HTTP, CLI, and concurrent reader tests against synthetic Brave SQLite fixtures.
 
@@ -29,9 +29,9 @@ with implemented behavior; do not claim unverified release or client support.
 
 ## Packaging & Distribution
 
-- `Formula/brave-history-mcp.rb` — Homebrew formula installing `brave-history-mcp` and configuring `service do` on `127.0.0.1:8083`.
+- `Formula/brave-history-mcp.rb` — Homebrew formula installing `brave-history-mcp` and configuring `service do` on `127.0.0.1:10003`.
 - `scripts/dev-formula.sh` — Local tarball staging helper for `just install-local` / `just reinstall-local` (restores `Formula/brave-history-mcp.rb` on failure).
-- `.cursor-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` — HTTP plugin manifests pointing to `http://127.0.0.1:8083/mcp`.
+- `.cursor-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` — HTTP plugin manifests pointing to `http://127.0.0.1:10003/mcp`.
 
 ## Conventions
 

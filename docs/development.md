@@ -14,7 +14,7 @@ not evidence that a runner/platform/client has passed.
 
 `brave-history-mcp` supports:
 
-- **Streamable HTTP** (recommended for IDE/agent clients): `brave-history-mcp http` (default `http://127.0.0.1:8083/mcp`, loopback-only unless `--allow-non-loopback`, fixed port `8083` unless `--allow-ephemeral-port`)
+- **Streamable HTTP** (recommended for IDE/agent clients): `brave-history-mcp http` (default `http://127.0.0.1:10003/mcp`, loopback-only unless `--allow-non-loopback`, fixed port `10003` unless `--allow-ephemeral-port`)
 - **Stdio MCP**: `brave-history-mcp mcp` (newline-delimited JSON-RPC over stdin/stdout)
 - **Direct CLI**: `brave-history-mcp <tool> ['{"arg":"val"}']` (defaults to `{}`)
 
@@ -37,7 +37,7 @@ Point MCP clients at the local service endpoint:
   "mcpServers": {
     "brave-history": {
       "type": "http",
-      "url": "http://127.0.0.1:8083/mcp"
+      "url": "http://127.0.0.1:10003/mcp"
     }
   }
 }
@@ -58,7 +58,7 @@ Point MCP clients at the local service endpoint:
 
 ### Plugin Manifests
 
-Preconfigured HTTP plugin manifests targeting `http://127.0.0.1:8083/mcp` live under:
+Preconfigured HTTP plugin manifests targeting `http://127.0.0.1:10003/mcp` live under:
 
 - `.cursor-plugin/plugin.json`
 - `.claude-plugin/plugin.json`

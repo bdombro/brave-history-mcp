@@ -12,7 +12,7 @@ class BraveHistoryMcp < Formula
   end
 
   service do
-    run [opt_bin/"brave-history-mcp", "http", "--host", "127.0.0.1", "--port", "8083"]
+    run [opt_bin/"brave-history-mcp", "http", "--host", "127.0.0.1", "--port", "10003"]
     keep_alive true
     log_path var/"log/brave-history-mcp.log"
     error_log_path var/"log/brave-history-mcp.log"

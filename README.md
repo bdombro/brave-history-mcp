@@ -56,7 +56,7 @@ brew services restart bdombro/brave-history-mcp/brave-history-mcp
 brew services stop bdombro/brave-history-mcp/brave-history-mcp
 ```
 
-The endpoint is `http://127.0.0.1:8083/mcp`; logs are under
+The endpoint is `http://127.0.0.1:10003/mcp`; logs are under
 `/opt/homebrew/var/log/`. To run in the foreground instead, use
 `brave-history-mcp http` (or `./build/bin/brave-history-mcp http` from a source checkout).
 Do not run the foreground server and service on the same port.
@@ -74,7 +74,7 @@ After starting the service, add this server to OpenCode v2.2.6's
     "servers": {
       "brave-history-mcp": {
         "type": "remote",
-        "url": "http://127.0.0.1:8083/mcp",
+        "url": "http://127.0.0.1:10003/mcp",
         "protocol": "2026-07-28"
       }
     }
@@ -109,7 +109,7 @@ brave-history-mcp status
 brave-history-mcp search '{"words":["kodiaq","service"]}'
 brave-history-mcp list '{"limit":10}'
 brave-history-mcp visits '{"url":"https://example.com/page"}'
-brave-history-mcp http --host 127.0.0.1 --port 8083
+brave-history-mcp http --host 127.0.0.1 --port 10003
 brave-history-mcp mcp
 ```
 
