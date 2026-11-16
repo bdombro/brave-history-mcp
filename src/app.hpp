@@ -5,16 +5,21 @@
 #include "schemas.hpp"
 
 #include <stdexcept>
+#include <string>
+
+#ifndef BRAVE_HISTORY_APP_VERSION
+#error "BRAVE_HISTORY_APP_VERSION must be defined by CMake"
+#endif
 
 namespace brave_history {
 
 inline slimr::PluginApp make_brave_history_app() {
-    slimr::PluginApp app("brave-history-mcp", "2.0.0");
+    slimr::PluginApp app("brave-history-mcp", BRAVE_HISTORY_APP_VERSION);
     app.description = "Search Brave browser history (titles, URLs, visits) over MCP.";
     app.instructions =
         "Your Brave browser history (read-only). Use it to recall sites, products, articles, or docs you looked at: "
         "search by keywords, list recent pages by domain/date, or get every visit to a URL.";
-    app.setBugsink("");
+    app.setBugsink("", "BUGSINK_DSN", std::string("brave-history-mcp@") + BRAVE_HISTORY_APP_VERSION);
 
     app.tool<SearchInput>(
         "search",
@@ -89,7 +94,7 @@ inline slimr::PluginApp make_brave_history_app() {
         "Show app version.",
         slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
         [](const StatusInput &) -> StatusOutput {
-            return StatusOutput{.version = "2.0.0"};
+            return StatusOutput{.version = BRAVE_HISTORY_APP_VERSION};
         });
 
     return app;
