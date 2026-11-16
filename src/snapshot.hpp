@@ -24,7 +24,7 @@
 
 namespace brave_history {
 
-inline std::shared_mutex& cache_mutex() {
+inline std::shared_mutex &cache_mutex() {
     static std::shared_mutex m;
     return m;
 }
@@ -33,28 +33,30 @@ struct BraveProfile {
     std::string dir;
     std::optional<std::string> name;
 
-    bool operator==(const BraveProfile& o) const = default;
+    bool operator==(const BraveProfile &o) const = default;
 };
 
 inline std::string braveRoot() {
     std::lock_guard<std::mutex> lock(env_mutex());
-    const char* env = std::getenv("BRAVE_HISTORY_ROOT");
-    if (env && *env) return std::string(env);
-    const char* home = std::getenv("HOME");
+    const char *env = std::getenv("BRAVE_HISTORY_ROOT");
+    if (env && *env)
+        return std::string(env);
+    const char *home = std::getenv("HOME");
     std::string h = home ? home : "";
     return (std::filesystem::path(h) / "Library" / "Application Support" / "BraveSoftware" / "Brave-Browser").string();
 }
 
 inline std::string cacheRoot() {
     std::lock_guard<std::mutex> lock(env_mutex());
-    const char* env = std::getenv("BRAVE_HISTORY_CACHE");
-    if (env && *env) return std::string(env);
-    const char* home = std::getenv("HOME");
+    const char *env = std::getenv("BRAVE_HISTORY_CACHE");
+    if (env && *env)
+        return std::string(env);
+    const char *home = std::getenv("HOME");
     std::string h = home ? home : "";
     return (std::filesystem::path(h) / ".local" / "share" / "brave-history").string();
 }
 
-inline int64_t get_file_mtime_ms(const std::filesystem::path& p) {
+inline int64_t get_file_mtime_ms(const std::filesystem::path &p) {
     struct stat st;
     if (stat(p.c_str(), &st) != 0) {
         return -1;
@@ -66,29 +68,34 @@ inline int64_t get_file_mtime_ms(const std::filesystem::path& p) {
 #endif
 }
 
-inline void lockDown(const std::filesystem::path& dir) {
+inline void lockDown(const std::filesystem::path &dir) {
     chmod(dir.c_str(), 0700);
     std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
         chmod(entry.path().c_str(), 0600);
     }
 }
 
-inline std::map<std::string, std::string> profileNames(const std::filesystem::path& root) {
+inline std::map<std::string, std::string> profileNames(const std::filesystem::path &root) {
     std::map<std::string, std::string> names;
     try {
         auto p = root / "Local State";
-        if (!std::filesystem::exists(p)) return names;
+        if (!std::filesystem::exists(p))
+            return names;
         std::ifstream f(p);
-        if (!f.is_open()) return names;
+        if (!f.is_open())
+            return names;
         std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         auto parsed = slimr::parse_json<slimr::Json>(content);
-        if (!parsed || !parsed->is_object()) return names;
-        if (!parsed->contains("profile") || !(*parsed)["profile"].is_object()) return names;
-        auto& prof = (*parsed)["profile"];
-        if (!prof.contains("info_cache") || !prof["info_cache"].is_object()) return names;
-        auto& cache = prof["info_cache"];
-        for (const auto& [dir, info] : cache.get<slimr::Json::object_t>()) {
+        if (!parsed || !parsed->is_object())
+            return names;
+        if (!parsed->contains("profile") || !(*parsed)["profile"].is_object())
+            return names;
+        auto &prof = (*parsed)["profile"];
+        if (!prof.contains("info_cache") || !prof["info_cache"].is_object())
+            return names;
+        auto &cache = prof["info_cache"];
+        for (const auto &[dir, info] : cache.get<slimr::Json::object_t>()) {
             if (info.is_object() && info.contains("name") && info["name"].is_string()) {
                 names[dir] = info["name"].get<std::string>();
             }
@@ -99,21 +106,26 @@ inline std::map<std::string, std::string> profileNames(const std::filesystem::pa
     return names;
 }
 
-inline bool isProfileDir(const std::string& dir) {
-    if (dir == "Default") return true;
+inline bool isProfileDir(const std::string &dir) {
+    if (dir == "Default")
+        return true;
     if (dir.starts_with("Profile ") && dir.size() > 8) {
         for (size_t i = 8; i < dir.size(); ++i) {
-            if (!std::isdigit(static_cast<unsigned char>(dir[i]))) return false;
+            if (!std::isdigit(static_cast<unsigned char>(dir[i])))
+                return false;
         }
         return true;
     }
     return false;
 }
 
-inline bool compareProfiles(const BraveProfile& a, const BraveProfile& b) {
-    if (a.dir == "Default" && b.dir == "Default") return false;
-    if (a.dir == "Default") return true;
-    if (b.dir == "Default") return false;
+inline bool compareProfiles(const BraveProfile &a, const BraveProfile &b) {
+    if (a.dir == "Default" && b.dir == "Default")
+        return false;
+    if (a.dir == "Default")
+        return true;
+    if (b.dir == "Default")
+        return false;
     try {
         int numA = std::stoi(a.dir.substr(8));
         int numB = std::stoi(b.dir.substr(8));
@@ -132,8 +144,9 @@ inline std::vector<BraveProfile> listProfiles() {
     std::vector<BraveProfile> profiles;
 
     std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
-        if (!entry.is_directory()) continue;
+    for (const auto &entry : std::filesystem::directory_iterator(root, ec)) {
+        if (!entry.is_directory())
+            continue;
         std::string dir = entry.path().filename().string();
         if (isProfileDir(dir) && std::filesystem::exists(entry.path() / "History")) {
             BraveProfile p{.dir = dir};
@@ -157,14 +170,14 @@ inline std::string to_lower_str(std::string_view s) {
     return res;
 }
 
-inline std::vector<BraveProfile> selectProfiles(const std::optional<std::string>& filter) {
+inline std::vector<BraveProfile> selectProfiles(const std::optional<std::string> &filter) {
     auto all = listProfiles();
     if (!filter.has_value() || filter->empty()) {
         return all;
     }
     std::string needle = to_lower_str(*filter);
     std::vector<BraveProfile> matched;
-    for (const auto& p : all) {
+    for (const auto &p : all) {
         if (to_lower_str(p.dir) == needle || (p.name && to_lower_str(*p.name) == needle)) {
             matched.push_back(p);
         }
@@ -172,7 +185,8 @@ inline std::vector<BraveProfile> selectProfiles(const std::optional<std::string>
     if (matched.empty()) {
         std::string known;
         for (size_t i = 0; i < all.size(); ++i) {
-            if (i > 0) known += ", ";
+            if (i > 0)
+                known += ", ";
             if (all[i].name) {
                 known += all[i].dir + " (" + *all[i].name + ")";
             } else {
@@ -184,14 +198,16 @@ inline std::vector<BraveProfile> selectProfiles(const std::optional<std::string>
     return matched;
 }
 
-inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
+inline std::string ensure_cached_history_locked(const BraveProfile &profile) {
     std::filesystem::path root = std::filesystem::absolute(braveRoot()).lexically_normal();
     std::filesystem::path cacheDir = std::filesystem::absolute(std::filesystem::path(cacheRoot()) / profile.dir).lexically_normal();
 
     std::string rootSlash = root.string();
-    if (!rootSlash.ends_with('/')) rootSlash += '/';
+    if (!rootSlash.ends_with('/'))
+        rootSlash += '/';
     std::string cacheDirSlash = cacheDir.string();
-    if (!cacheDirSlash.ends_with('/')) cacheDirSlash += '/';
+    if (!cacheDirSlash.ends_with('/'))
+        cacheDirSlash += '/';
 
     if (cacheDirSlash.starts_with(rootSlash)) {
         throw std::runtime_error("Refusing to cache inside the Brave data dir: " + cacheDir.string());
@@ -202,7 +218,7 @@ inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
 
     int64_t sourceMtimeMs = 0;
     const std::vector<std::string> sidecars = {"", "-wal", "-journal"};
-    for (const auto& suffix : sidecars) {
+    for (const auto &suffix : sidecars) {
         int64_t m = get_file_mtime_ms(source.string() + suffix);
         if (m > sourceMtimeMs) {
             sourceMtimeMs = m;
@@ -213,7 +229,8 @@ inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
     if (sourceMtimeMs <= cachedMtimeMs) {
         try {
             lockDown(cacheDir);
-        } catch (...) {}
+        } catch (...) {
+        }
         return cached.string();
     }
 
@@ -225,19 +242,20 @@ inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
     std::vector<char> tmpl_buf(tmpl.begin(), tmpl.end());
     tmpl_buf.push_back('\0');
 
-    char* staging_res = mkdtemp(tmpl_buf.data());
+    char *staging_res = mkdtemp(tmpl_buf.data());
     if (!staging_res) {
         throw std::runtime_error("Failed to create temporary directory for history staging");
     }
     std::filesystem::path staging(staging_res);
 
     try {
-        for (const auto& suffix : sidecars) {
+        for (const auto &suffix : sidecars) {
             std::filesystem::path srcFile = source.string() + suffix;
             std::error_code ec;
             if (std::filesystem::exists(srcFile, ec)) {
                 std::filesystem::copy_file(srcFile, staging / ("History" + suffix), std::filesystem::copy_options::overwrite_existing, ec);
-                if (ec) throw std::system_error(ec, "Failed to copy " + srcFile.string());
+                if (ec)
+                    throw std::system_error(ec, "Failed to copy " + srcFile.string());
             }
         }
 
@@ -267,13 +285,13 @@ inline std::string ensure_cached_history_locked(const BraveProfile& profile) {
     }
 }
 
-inline std::string ensureCachedHistory(const BraveProfile& profile) {
+inline std::string ensureCachedHistory(const BraveProfile &profile) {
     std::unique_lock<std::shared_mutex> lock(cache_mutex());
     return ensure_cached_history_locked(profile);
 }
 
 template <typename Fn>
-inline auto withCachedHistoryDb(const BraveProfile& profile, Fn&& fn) {
+inline auto withCachedHistoryDb(const BraveProfile &profile, Fn &&fn) {
     std::string cachedPath;
     {
         std::unique_lock<std::shared_mutex> writeLock(cache_mutex());

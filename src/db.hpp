@@ -2,8 +2,8 @@
 
 #include "schemas.hpp"
 #include "snapshot.hpp"
-#include "time.hpp"
 #include "sqlite.hpp"
+#include "time.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -65,14 +65,19 @@ inline std::string escapeLike(std::string_view text) {
     return res;
 }
 
-inline std::optional<std::string> normalizeDomain(const std::optional<std::string>& domain) {
-    if (!domain.has_value()) return std::nullopt;
+inline std::optional<std::string> normalizeDomain(const std::optional<std::string> &domain) {
+    if (!domain.has_value())
+        return std::nullopt;
     std::string s = *domain;
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
-    if (s.empty()) return std::nullopt;
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+        s.pop_back();
+    if (s.empty())
+        return std::nullopt;
 
-    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (char &c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     size_t scheme_pos = s.find("://");
     if (scheme_pos != std::string::npos) {
@@ -97,7 +102,8 @@ inline std::optional<std::string> normalizeDomain(const std::optional<std::strin
     if (end_pos != std::string::npos) {
         s = s.substr(0, end_pos);
     }
-    if (s.empty()) return std::nullopt;
+    if (s.empty())
+        return std::nullopt;
     return s;
 }
 
@@ -106,7 +112,7 @@ struct ChromeRange {
     int64_t end = 0;
 };
 
-inline std::optional<ChromeRange> chromeRange(const std::optional<std::string>& from, const std::optional<std::string>& to) {
+inline std::optional<ChromeRange> chromeRange(const std::optional<std::string> &from, const std::optional<std::string> &to) {
     if (!from.has_value() && !to.has_value()) {
         return std::nullopt;
     }
@@ -118,23 +124,22 @@ inline std::optional<ChromeRange> chromeRange(const std::optional<std::string>& 
 
 template <typename T, typename RowMapper>
 inline std::vector<T> acrossProfiles(
-    const std::optional<std::string>& profileFilter,
+    const std::optional<std::string> &profileFilter,
     int limitCount,
-    const std::string& sql,
-    const std::vector<slimr::SqlValue>& params,
-    RowMapper&& toRow
-) {
+    const std::string &sql,
+    const std::vector<slimr::SqlValue> &params,
+    RowMapper &&toRow) {
     struct MergedItem {
         int64_t chrome;
         T row;
     };
     std::vector<MergedItem> merged;
 
-    for (const auto& profile : selectProfiles(profileFilter)) {
-        const std::vector<slimr::Json> rows = withCachedHistoryDb(profile, [&](slimr::SqliteDb& db) {
+    for (const auto &profile : selectProfiles(profileFilter)) {
+        const std::vector<slimr::Json> rows = withCachedHistoryDb(profile, [&](slimr::SqliteDb &db) {
             return db.all<slimr::Json>(sql, params);
         });
-        for (const auto& row : rows) {
+        for (const auto &row : rows) {
             int64_t chrome = 0;
             if (row.contains("lastChrome") && !row["lastChrome"].is_null()) {
                 chrome = row["lastChrome"].get<int64_t>();
@@ -148,7 +153,7 @@ inline std::vector<T> acrossProfiles(
         }
     }
 
-    std::stable_sort(merged.begin(), merged.end(), [](const MergedItem& a, const MergedItem& b) {
+    std::stable_sort(merged.begin(), merged.end(), [](const MergedItem &a, const MergedItem &b) {
         return a.chrome > b.chrome;
     });
 
@@ -159,13 +164,13 @@ inline std::vector<T> acrossProfiles(
 
     std::vector<T> result;
     result.reserve(merged.size());
-    for (auto& item : merged) {
+    for (auto &item : merged) {
         result.push_back(std::move(item.row));
     }
     return result;
 }
 
-inline std::vector<PageRow> queryPages(const PageQuery& query) {
+inline std::vector<PageRow> queryPages(const PageQuery &query) {
     auto range = chromeRange(query.from, query.to);
     std::vector<std::string> where = {"u.hidden = 0"};
     std::vector<slimr::SqlValue> params;
@@ -180,7 +185,7 @@ inline std::vector<PageRow> queryPages(const PageQuery& query) {
         having = "MAX(v.visit_time) IS NOT NULL OR (u.last_visit_time >= ? AND u.last_visit_time < ?)";
     }
 
-    for (const auto& word : query.words) {
+    for (const auto &word : query.words) {
         where.push_back("(u.title LIKE ? ESCAPE '\\' OR u.url LIKE ? ESCAPE '\\')");
         std::string pattern = "%" + escapeLike(word) + "%";
         params.push_back(pattern);
@@ -202,23 +207,30 @@ inline std::vector<PageRow> queryPages(const PageQuery& query) {
 
     std::string whereClause;
     for (size_t i = 0; i < where.size(); ++i) {
-        if (i > 0) whereClause += " AND ";
+        if (i > 0)
+            whereClause += " AND ";
         whereClause += where[i];
     }
 
     std::string sql = "SELECT u.url, u.title, u.visit_count AS visitCount, "
                       "COALESCE(MAX(v.visit_time), u.last_visit_time) AS lastChrome, "
-                      "(COALESCE(MAX(v.visit_time), u.last_visit_time) - " + std::to_string(CHROME_EPOCH_OFFSET_MICROS) + ") / 1000 AS lastMs "
-                      "FROM urls u " + joinSql + " "
-                      "WHERE " + whereClause + " "
-                      "GROUP BY u.id "
-                      "HAVING " + having + " "
-                      "ORDER BY lastChrome DESC "
-                      "LIMIT ?";
+                      "(COALESCE(MAX(v.visit_time), u.last_visit_time) - " +
+                      std::to_string(CHROME_EPOCH_OFFSET_MICROS) + ") / 1000 AS lastMs "
+                                                                   "FROM urls u " +
+                      joinSql + " "
+                                "WHERE " +
+                      whereClause + " "
+                                    "GROUP BY u.id "
+                                    "HAVING " +
+                      having + " "
+                               "ORDER BY lastChrome DESC "
+                               "LIMIT ?";
 
     std::vector<slimr::SqlValue> allParams;
-    for (const auto& p : joinParams) allParams.push_back(p);
-    for (const auto& p : params) allParams.push_back(p);
+    for (const auto &p : joinParams)
+        allParams.push_back(p);
+    for (const auto &p : params)
+        allParams.push_back(p);
     if (range) {
         allParams.push_back(range->start);
         allParams.push_back(range->end);
@@ -226,7 +238,7 @@ inline std::vector<PageRow> queryPages(const PageQuery& query) {
     allParams.push_back(static_cast<int64_t>(query.limit));
 
     std::string tz = timeZone();
-    return acrossProfiles<PageRow>(query.profile, query.limit, sql, allParams, [&](const slimr::Json& row, const BraveProfile& profile) {
+    return acrossProfiles<PageRow>(query.profile, query.limit, sql, allParams, [&](const slimr::Json &row, const BraveProfile &profile) {
         std::string title;
         if (row.contains("title") && !row["title"].is_null()) {
             title = row["title"].get<std::string>();
@@ -244,7 +256,7 @@ inline std::vector<PageRow> queryPages(const PageQuery& query) {
     });
 }
 
-inline std::vector<VisitRow> queryVisits(const VisitQuery& query) {
+inline std::vector<VisitRow> queryVisits(const VisitQuery &query) {
     auto range = chromeRange(query.from, query.to);
     std::vector<std::string> where;
     std::vector<slimr::SqlValue> params;
@@ -266,23 +278,26 @@ inline std::vector<VisitRow> queryVisits(const VisitQuery& query) {
 
     std::string whereClause;
     for (size_t i = 0; i < where.size(); ++i) {
-        if (i > 0) whereClause += " AND ";
+        if (i > 0)
+            whereClause += " AND ";
         whereClause += where[i];
     }
 
     std::string sql = "SELECT u.url, u.title, v.visit_time AS timeChrome, "
-                      "(v.visit_time - " + std::to_string(CHROME_EPOCH_OFFSET_MICROS) + ") / 1000 AS timeMs, "
-                      "v.transition & 255 AS coreTransition, v.visit_duration AS durationMicros "
-                      "FROM visits v JOIN urls u ON u.id = v.url "
-                      "WHERE " + whereClause + " "
-                      "ORDER BY v.visit_time DESC "
-                      "LIMIT ?";
+                      "(v.visit_time - " +
+                      std::to_string(CHROME_EPOCH_OFFSET_MICROS) + ") / 1000 AS timeMs, "
+                                                                   "v.transition & 255 AS coreTransition, v.visit_duration AS durationMicros "
+                                                                   "FROM visits v JOIN urls u ON u.id = v.url "
+                                                                   "WHERE " +
+                      whereClause + " "
+                                    "ORDER BY v.visit_time DESC "
+                                    "LIMIT ?";
 
     std::vector<slimr::SqlValue> allParams = params;
     allParams.push_back(static_cast<int64_t>(query.limit));
 
     std::string tz = timeZone();
-    return acrossProfiles<VisitRow>(query.profile, query.limit, sql, allParams, [&](const slimr::Json& row, const BraveProfile& profile) {
+    return acrossProfiles<VisitRow>(query.profile, query.limit, sql, allParams, [&](const slimr::Json &row, const BraveProfile &profile) {
         std::string title;
         if (row.contains("title") && !row["title"].is_null()) {
             title = row["title"].get<std::string>();
@@ -295,8 +310,8 @@ inline std::vector<VisitRow> queryVisits(const VisitQuery& query) {
             durationMicros = row["durationMicros"].get<int64_t>();
         }
         std::string transition = (coreTrans >= 0 && static_cast<size_t>(coreTrans) < TRANSITIONS.size())
-            ? TRANSITIONS[static_cast<size_t>(coreTrans)]
-            : ("unknown_" + std::to_string(coreTrans));
+                                     ? TRANSITIONS[static_cast<size_t>(coreTrans)]
+                                     : ("unknown_" + std::to_string(coreTrans));
         double durationSeconds = std::round(static_cast<double>(durationMicros) / 100000.0) / 10.0;
         return VisitRow{
             .time = format_local_iso(timeMs, tz),

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "snapshot.hpp"
-#include "time.hpp"
 #include "sqlite.hpp"
 #include "test.hpp"
+#include "time.hpp"
 
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -21,7 +21,7 @@
 
 namespace brave_history::testing {
 
-inline int64_t parse_iso_utc_ms(const std::string& s) {
+inline int64_t parse_iso_utc_ms(const std::string &s) {
     struct tm tm_utc{};
     int y = std::stoi(s.substr(0, 4));
     int m = std::stoi(s.substr(5, 2));
@@ -45,7 +45,7 @@ inline int64_t parse_iso_utc_ms(const std::string& s) {
     return ms;
 }
 
-inline void setMtime(const std::string& path, int64_t ms) {
+inline void setMtime(const std::string &path, int64_t ms) {
     struct timeval tv[2];
     tv[0].tv_sec = static_cast<time_t>(ms / 1000);
     tv[0].tv_usec = static_cast<suseconds_t>((ms % 1000) * 1000);
@@ -66,25 +66,23 @@ struct FixturePage {
     std::vector<FixtureVisit> visits;
 };
 
-inline void addPage(slimr::SqliteDb& db, const FixturePage& page) {
+inline void addPage(slimr::SqliteDb &db, const FixturePage &page) {
     std::vector<int64_t> times;
     times.reserve(page.visits.size());
-    for (const auto& v : page.visits) {
+    for (const auto &v : page.visits) {
         times.push_back(unixMsToChromeMicros(parse_iso_utc_ms(v.at)));
     }
     int64_t last = times.empty() ? 0LL : *std::max_element(times.begin(), times.end());
 
     auto res = db.run(
         "INSERT INTO urls (url, title, visit_count, last_visit_time, hidden) VALUES (?, ?, ?, ?, ?)",
-        {page.url, page.title, static_cast<int64_t>(page.visits.size()), last, page.hidden ? 1LL : 0LL}
-    );
+        {page.url, page.title, static_cast<int64_t>(page.visits.size()), last, page.hidden ? 1LL : 0LL});
     int64_t urlId = res.lastInsertRowid;
 
     for (size_t i = 0; i < page.visits.size(); ++i) {
         db.run(
             "INSERT INTO visits (url, visit_time, transition, visit_duration) VALUES (?, ?, ?, ?)",
-            {urlId, times[i], page.visits[i].transition, page.visits[i].durationMicros}
-        );
+            {urlId, times[i], page.visits[i].transition, page.visits[i].durationMicros});
     }
 }
 
@@ -106,15 +104,15 @@ struct Fixture {
         }
     }
 
-    Fixture(const Fixture&) = delete;
-    Fixture& operator=(const Fixture&) = delete;
+    Fixture(const Fixture &) = delete;
+    Fixture &operator=(const Fixture &) = delete;
 
-    Fixture(Fixture&& o) noexcept
+    Fixture(Fixture &&o) noexcept
         : base(std::move(o.base)), root(std::move(o.root)), cache(std::move(o.cache)) {
         o.base.clear();
     }
 
-    Fixture& operator=(Fixture&& o) noexcept {
+    Fixture &operator=(Fixture &&o) noexcept {
         if (this != &o) {
             std::error_code ec;
             if (!base.empty()) {
@@ -129,14 +127,13 @@ struct Fixture {
     }
 };
 
-inline std::string historyPath(const Fixture& fixture, const std::string& profileDir) {
+inline std::string historyPath(const Fixture &fixture, const std::string &profileDir) {
     return (std::filesystem::path(fixture.root) / profileDir / "History").string();
 }
 
 inline Fixture createFixture(
-    const std::map<std::string, std::vector<FixturePage>>& profiles,
-    const std::map<std::string, std::string>& names = {}
-) {
+    const std::map<std::string, std::vector<FixturePage>> &profiles,
+    const std::map<std::string, std::string> &names = {}) {
     auto base = slimr::testing::temp_dir("brave_history_test_");
     Fixture fixture(base);
 
@@ -145,7 +142,7 @@ inline Fixture createFixture(
 
     slimr::Json localState = slimr::Json::object_t{};
     slimr::Json infoCache = slimr::Json::object_t{};
-    for (const auto& [dir, name] : names) {
+    for (const auto &[dir, name] : names) {
         infoCache[dir]["name"] = name;
     }
     localState["profile"]["info_cache"] = infoCache;
@@ -154,7 +151,7 @@ inline Fixture createFixture(
         f << slimr::write_json(localState);
     }
 
-    for (const auto& [dir, pages] : profiles) {
+    for (const auto &[dir, pages] : profiles) {
         auto profDir = std::filesystem::path(fixture.root) / dir;
         std::filesystem::create_directories(profDir);
         std::string dbPath = historyPath(fixture, dir);
@@ -165,9 +162,8 @@ inline Fixture createFixture(
             "last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL); "
             "CREATE TABLE visits (id INTEGER PRIMARY KEY, url INTEGER NOT NULL, visit_time INTEGER NOT NULL, "
             "from_visit INTEGER, transition INTEGER DEFAULT 0 NOT NULL, segment_id INTEGER, "
-            "visit_duration INTEGER DEFAULT 0 NOT NULL);"
-        );
-        for (const auto& page : pages) {
+            "visit_duration INTEGER DEFAULT 0 NOT NULL);");
+        for (const auto &page : pages) {
             addPage(db, page);
         }
         db.close();

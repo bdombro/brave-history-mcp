@@ -28,13 +28,13 @@ inline std::mutex g_tz_mutex;
 
 } // namespace detail
 
-inline std::mutex& env_mutex() {
+inline std::mutex &env_mutex() {
     return detail::g_tz_mutex;
 }
 
 inline std::string timeZone() {
     std::lock_guard<std::mutex> lock(env_mutex());
-    const char* env = std::getenv("BRAVE_HISTORY_TZ");
+    const char *env = std::getenv("BRAVE_HISTORY_TZ");
     return (env && *env) ? std::string(env) : DEFAULT_TIME_ZONE;
 }
 
@@ -44,9 +44,9 @@ struct TzGuard {
     std::string old_tz;
     bool had_old = false;
 
-    explicit TzGuard(const std::string& tz) {
+    explicit TzGuard(const std::string &tz) {
         g_tz_mutex.lock();
-        const char* cur = std::getenv("TZ");
+        const char *cur = std::getenv("TZ");
         if (cur) {
             old_tz = cur;
             had_old = true;
@@ -66,7 +66,7 @@ struct TzGuard {
     }
 };
 
-inline int64_t get_gmtoff_ms(int64_t unix_ms, const std::string& tz) {
+inline int64_t get_gmtoff_ms(int64_t unix_ms, const std::string &tz) {
     TzGuard guard(tz);
     time_t sec = static_cast<time_t>(unix_ms / 1000);
     struct tm tm_out{};
@@ -76,7 +76,7 @@ inline int64_t get_gmtoff_ms(int64_t unix_ms, const std::string& tz) {
 
 } // namespace detail
 
-inline std::string format_local_iso(int64_t unix_ms, const std::string& tz) {
+inline std::string format_local_iso(int64_t unix_ms, const std::string &tz) {
     detail::TzGuard guard(tz);
     time_t sec = static_cast<time_t>(unix_ms / 1000);
     struct tm tm_out{};
@@ -99,12 +99,13 @@ inline std::string format_local_iso(int64_t unix_ms, const std::string& tz) {
     return std::string(buf);
 }
 
-inline int64_t local_day_start_ms(const std::string& date, const std::string& tz) {
+inline int64_t local_day_start_ms(const std::string &date, const std::string &tz) {
     if (date.size() != 10 || date[4] != '-' || date[7] != '-') {
         throw std::runtime_error("Invalid date (expected YYYY-MM-DD): " + date);
     }
     for (size_t i = 0; i < 10; ++i) {
-        if (i == 4 || i == 7) continue;
+        if (i == 4 || i == 7)
+            continue;
         if (!std::isdigit(static_cast<unsigned char>(date[i]))) {
             throw std::runtime_error("Invalid date (expected YYYY-MM-DD): " + date);
         }
@@ -128,7 +129,7 @@ inline int64_t local_day_start_ms(const std::string& date, const std::string& tz
     return second;
 }
 
-inline std::string nextDay(const std::string& date) {
+inline std::string nextDay(const std::string &date) {
     if (date.size() != 10 || date[4] != '-' || date[7] != '-') {
         throw std::runtime_error("Invalid date (expected YYYY-MM-DD): " + date);
     }

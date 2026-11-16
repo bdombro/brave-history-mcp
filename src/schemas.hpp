@@ -11,10 +11,12 @@ namespace brave_history {
 using slimr::Field;
 using slimr::OptField;
 
-inline std::string urlClean(const std::string& url, bool full) {
-    if (full) return url;
+inline std::string urlClean(const std::string &url, bool full) {
+    if (full)
+        return url;
     size_t cut = url.find_first_of("?#");
-    if (cut == std::string::npos) return url;
+    if (cut == std::string::npos)
+        return url;
     return url.substr(0, cut);
 }
 
@@ -25,13 +27,13 @@ struct PageRow {
     int64_t visitCount = 0;
     std::string profile;
 
-    bool operator==(const PageRow& o) const = default;
+    bool operator==(const PageRow &o) const = default;
 };
 
 struct PagesOutput {
     std::vector<PageRow> pages;
 
-    bool operator==(const PagesOutput& o) const = default;
+    bool operator==(const PagesOutput &o) const = default;
 };
 
 struct VisitRow {
@@ -42,19 +44,19 @@ struct VisitRow {
     double durationSeconds = 0.0;
     std::string profile;
 
-    bool operator==(const VisitRow& o) const = default;
+    bool operator==(const VisitRow &o) const = default;
 };
 
 struct VisitsOutput {
     std::vector<VisitRow> visits;
 
-    bool operator==(const VisitsOutput& o) const = default;
+    bool operator==(const VisitsOutput &o) const = default;
 };
 
 struct StatusOutput {
     std::string version = "2.0.0";
 
-    bool operator==(const StatusOutput& o) const = default;
+    bool operator==(const StatusOutput &o) const = default;
 };
 
 struct StatusInput {

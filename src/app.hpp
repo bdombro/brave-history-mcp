@@ -1,8 +1,8 @@
 #pragma once
 
 #include "db.hpp"
-#include "schemas.hpp"
 #include "mcp.hpp"
+#include "schemas.hpp"
 
 #include <stdexcept>
 
@@ -21,7 +21,7 @@ inline slimr::PluginApp make_brave_history_app() {
         "Search Brave history by keywords in page titles and URLs (matching uses the full stored URL). "
         "URLs come back without query strings or #fragments unless fullUrls is set.",
         slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
-        [](const SearchInput& in) -> PagesOutput {
+        [](const SearchInput &in) -> PagesOutput {
             if (in.words.get().empty()) {
                 throw std::runtime_error("words must contain at least 1 keyword");
             }
@@ -35,18 +35,17 @@ inline slimr::PluginApp make_brave_history_app() {
             q.limit = in.limit.get();
 
             auto pages = queryPages(q);
-            for (auto& p : pages) {
+            for (auto &p : pages) {
                 p.url = urlClean(p.url, full);
             }
             return PagesOutput{.pages = std::move(pages)};
-        }
-    );
+        });
 
     app.tool<ListInput>(
         "list",
         "List recently visited pages in Brave, newest first. URLs come back without query strings or #fragments unless fullUrls is set.",
         slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
-        [](const ListInput& in) -> PagesOutput {
+        [](const ListInput &in) -> PagesOutput {
             bool full = in.fullUrls.get().value_or(false);
             PageQuery q;
             q.words = {};
@@ -57,19 +56,18 @@ inline slimr::PluginApp make_brave_history_app() {
             q.limit = in.limit.get();
 
             auto pages = queryPages(q);
-            for (auto& p : pages) {
+            for (auto &p : pages) {
                 p.url = urlClean(p.url, full);
             }
             return PagesOutput{.pages = std::move(pages)};
-        }
-    );
+        });
 
     app.tool<VisitsInput>(
         "visits",
         "List every Brave visit to a URL (or URL prefix) with times and transition types. "
         "URLs come back without query strings or #fragments unless fullUrls is set.",
         slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
-        [](const VisitsInput& in) -> VisitsOutput {
+        [](const VisitsInput &in) -> VisitsOutput {
             bool full = in.fullUrls.get().value_or(false);
             VisitQuery q;
             q.url = in.url.get();
@@ -80,21 +78,19 @@ inline slimr::PluginApp make_brave_history_app() {
             q.limit = in.limit.get();
 
             auto visits = queryVisits(q);
-            for (auto& v : visits) {
+            for (auto &v : visits) {
                 v.url = urlClean(v.url, full);
             }
             return VisitsOutput{.visits = std::move(visits)};
-        }
-    );
+        });
 
     app.tool<StatusInput>(
         "status",
         "Show app version.",
         slimr::ToolAnnotations{.readOnlyHint = true, .openWorldHint = false},
-        [](const StatusInput&) -> StatusOutput {
+        [](const StatusInput &) -> StatusOutput {
             return StatusOutput{.version = "2.0.0"};
-        }
-    );
+        });
 
     return app;
 }
