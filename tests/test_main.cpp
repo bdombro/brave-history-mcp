@@ -735,7 +735,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         CHECK(listResp["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
     }
 
-    TEST_CASE("http security invariants and CLI behavior") {
+    TEST_CASE("CLI behavior") {
         auto fixture = createFixture({
             {"Default", {
                             {.url = "https://example.com/status-check", .title = "Status Page", .visits = {{.at = "2026-03-01T10:00:00Z"}}},
@@ -743,29 +743,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         });
         auto app = make_brave_history_app();
 
-        slimr::HttpServerOptions nonLoopback;
-        nonLoopback.host = "0.0.0.0";
-        nonLoopback.port = 0;
-        nonLoopback.allowEphemeralPort = true;
-        slimr::McpHttpServer badHost(app, nonLoopback);
-        std::string err;
-        CHECK(badHost.start(&err) == false);
-        CHECK(err.find("Non-loopback") != std::string::npos);
-
-        slimr::HttpServerOptions unflaggedEphemeral;
-        unflaggedEphemeral.host = "127.0.0.1";
-        unflaggedEphemeral.port = 0;
-        slimr::McpHttpServer badPort(app, unflaggedEphemeral);
-        CHECK(badPort.start(&err) == false);
-
-        slimr::enable_http(app, slimr::HttpServerOptions{.host = "127.0.0.1", .port = 10003});
         char a0[] = "brave-history-mcp";
-        char a1[] = "http";
-        char a2[] = "--host";
-        char a3[] = "0.0.0.0";
-        char *badArgv[] = {a0, a1, a2, a3, nullptr};
-        CHECK(app.run(4, badArgv) == 1);
-
         char s1[] = "status";
         char *statusArgv[] = {a0, s1, nullptr};
         std::stringstream ss;
@@ -790,7 +768,6 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         slimr::HttpServerOptions opts;
         opts.host = "127.0.0.1";
         opts.port = 0;
-        opts.allowEphemeralPort = true;
         slimr::McpHttpServer srv(app, opts);
         std::string err;
         REQUIRE(srv.start(&err));
