@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Internal: remove temporary vcpkg overlay-ports and pin slimr-serve v0.1.1 and slimr-mcp v0.2.0.
 - Internal: migrate to slimr-serve typed handlers and remove stdio mcp mode.
 - Internal: drop libhv and slimr-curl; upgrade to slimr-mcp v0.1.3 (cpp-httplib) and slimr-bugsink v0.1.2.
 - Internal: switch macOS builds to llvm@23 with static libc++ and symbol hiding.
