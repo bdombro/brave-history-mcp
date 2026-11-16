@@ -760,6 +760,10 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         const auto discResp = app.dispatchMcpJson(make_mcp_request(2, "server/discover"));
         CHECK(discResp["result"]["supportedVersions"][0].get<std::string>() == slimr::kMcpProtocolVersion);
         CHECK(discResp["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].get<std::string>() == "brave-history-mcp");
+        CHECK(discResp["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
+        REQUIRE(app.bugsink() != nullptr);
+        CHECK(app.bugsink()->release() == std::string("brave-history-mcp@") + BRAVE_HISTORY_APP_VERSION);
+        CHECK(app.bugsink()->effectiveDsn().empty());
 
         const auto listResp = app.dispatchMcpJson(make_mcp_request(3, "tools/list"));
         CHECK(listResp["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
@@ -783,7 +787,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         CHECK(rc == 0);
         auto parsedStatus = slimr::parse_json<slimr::Json>(ss.str());
         REQUIRE(parsedStatus.has_value());
-        CHECK((*parsedStatus)["version"].get<std::string>() == "2.0.0");
+        CHECK((*parsedStatus)["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
     }
 
     TEST_CASE("ephemeral Streamable HTTP server serves discovery, tools and concurrent reads") {

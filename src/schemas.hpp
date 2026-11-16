@@ -54,7 +54,7 @@ struct VisitsOutput {
 };
 
 struct StatusOutput {
-    std::string version = "2.0.0";
+    std::string version;
 
     bool operator==(const StatusOutput &o) const = default;
 };
