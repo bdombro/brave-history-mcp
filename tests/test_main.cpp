@@ -245,6 +245,35 @@ TEST_SUITE("cached History copy") {
         }
     }
 
+    TEST_CASE("cacheRoot defaults to brew prefix var and honors BRAVE_HISTORY_CACHE override") {
+        struct EnvRestore {
+            std::string name;
+            std::optional<std::string> prev;
+            explicit EnvRestore(std::string n) : name(std::move(n)) {
+                if (const char *v = std::getenv(name.c_str())) {
+                    prev = v;
+                }
+            }
+            ~EnvRestore() {
+                if (prev.has_value()) {
+                    setenv(name.c_str(), prev->c_str(), 1);
+                } else {
+                    unsetenv(name.c_str());
+                }
+            }
+        };
+
+        EnvRestore restoreCache("BRAVE_HISTORY_CACHE");
+        EnvRestore restorePrefix("HOMEBREW_PREFIX");
+
+        unsetenv("BRAVE_HISTORY_CACHE");
+        setenv("HOMEBREW_PREFIX", "/tmp/test-brew-prefix/", 1);
+        CHECK(cacheRoot() == "/tmp/test-brew-prefix/var/brave-history-mcp");
+
+        setenv("BRAVE_HISTORY_CACHE", "/tmp/custom-brave-cache", 1);
+        CHECK(cacheRoot() == "/tmp/custom-brave-cache");
+    }
+
     TEST_CASE("cache dir is 0o700 and the copied files 0o600, including pre-existing loose ones") {
         auto fixture = createFixture(
             {{"Default", {page("https://a.example/", "2026-01-01T10:00:00Z")}}},
