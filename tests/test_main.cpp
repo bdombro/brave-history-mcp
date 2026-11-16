@@ -6,6 +6,7 @@
 #include "mcp_http.hpp"
 #include "schemas.hpp"
 #include "snapshot.hpp"
+#include "test_log_file.hpp"
 #include "time.hpp"
 
 #include <algorithm>
