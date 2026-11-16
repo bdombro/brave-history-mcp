@@ -19,7 +19,7 @@ just test-mcp
 
 ## Platforms
 
-`brave-history-mcp` targets macOS (`platforms := "macos"`) because it reads desktop Brave Browser profiles. On macOS, builds use Apple Clang (`/usr/bin/clang++`) targeting macOS 15.0+ with no runtime dependency on Homebrew LLVM.
+`brave-history-mcp` targets macOS (`platforms := "macos"`) because it reads desktop Brave Browser profiles. On macOS, builds use Homebrew `llvm@23` (`clang`/`clang++`) with static `libc++` and symbol hiding targeting macOS 15.0+, with no runtime dependency on Homebrew LLVM.
 
 ## Transports & MCP `2026-07-28`
 
