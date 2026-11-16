@@ -24,7 +24,6 @@ just test-mcp
 ## Transports & MCP `2026-07-28`
 
 - **Streamable HTTP**: `brave-history-mcp http` (default `0.0.0.0:10003`, override with `--host` / `--port`)
-- **Stdio MCP**: `brave-history-mcp mcp`
 - **Direct CLI**: `brave-history-mcp <tool> ['{"arg":"val"}']` (defaults to `{}`)
 
 This server targets **MCP protocol version `2026-07-28`** (`server/discover` instead of legacy `initialize`).

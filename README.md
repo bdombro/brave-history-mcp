@@ -37,7 +37,7 @@ Add to `.mcp.json` or OpenCode `opencode.jsonc`:
 }
 ```
 
-Or run over stdio (`brave-history-mcp mcp`) or direct CLI:
+Or run via direct CLI:
 
 ```bash
 brave-history-mcp status

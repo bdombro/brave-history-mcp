@@ -72,6 +72,8 @@ TEST_SUITE("status command") {
         const auto &statusTool = app.tools().at("status");
         CHECK(statusTool.inputSchema.contains("properties"));
         CHECK(statusTool.inputSchema["properties"].contains("json"));
+        REQUIRE(statusTool.outputSchema.has_value());
+        CHECK((*statusTool.outputSchema)["properties"].contains("version"));
     }
 }
 
@@ -838,7 +840,11 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             CHECK(resp.status == 200);
             auto j = slimr::parse_json<slimr::Json>(resp.body);
             REQUIRE(j.has_value());
-            CHECK((*j)["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
+            const auto &tools = (*j)["result"]["tools"].get<slimr::Json::array_t>();
+            CHECK(tools.size() == 4);
+            for (const auto &tool : tools) {
+                CHECK(tool.contains("outputSchema"));
+            }
         }
 
         // 4. search, list, visits, status over HTTP
@@ -850,6 +856,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             auto sj = slimr::parse_json<slimr::Json>(sResp.body);
             REQUIRE(sj.has_value());
             CHECK((*sj)["result"]["isError"].get<bool>() == false);
+            CHECK((*sj)["result"]["structuredContent"]["pages"].get<slimr::Json::array_t>().size() == 1);
             auto parsed = slimr::parse_json<slimr::Json>((*sj)["result"]["content"][0]["text"].get<std::string>());
             REQUIRE(parsed.has_value());
             CHECK((*parsed)["pages"].get<slimr::Json::array_t>().size() == 1);
@@ -860,6 +867,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             CHECK(lResp.status == 200);
             auto lj = slimr::parse_json<slimr::Json>(lResp.body);
             REQUIRE(lj.has_value());
+            CHECK((*lj)["result"]["structuredContent"]["pages"].get<slimr::Json::array_t>().size() == 2);
             auto lParsed = slimr::parse_json<slimr::Json>((*lj)["result"]["content"][0]["text"].get<std::string>());
             REQUIRE(lParsed.has_value());
             CHECK((*lParsed)["pages"].get<slimr::Json::array_t>().size() == 2);
@@ -870,6 +878,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             CHECK(vResp.status == 200);
             auto vj = slimr::parse_json<slimr::Json>(vResp.body);
             REQUIRE(vj.has_value());
+            CHECK((*vj)["result"]["structuredContent"]["visits"].get<slimr::Json::array_t>().size() == 1);
             auto vParsed = slimr::parse_json<slimr::Json>((*vj)["result"]["content"][0]["text"].get<std::string>());
             REQUIRE(vParsed.has_value());
             CHECK((*vParsed)["visits"].get<slimr::Json::array_t>().size() == 1);
@@ -881,6 +890,7 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             auto stj = slimr::parse_json<slimr::Json>(stResp.body);
             REQUIRE(stj.has_value());
             CHECK((*stj)["result"]["isError"].get<bool>() == false);
+            CHECK((*stj)["result"]["structuredContent"]["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
         }
 
         // 5. Concurrent HTTP callers across threads
