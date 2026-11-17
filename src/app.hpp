@@ -20,7 +20,6 @@ inline slimr::PluginApp make_brave_history_app() {
         "Your Brave browser history (read-only). Use it to recall sites, products, articles, or docs you looked at: "
         "search by keywords, list recent pages by domain/date, or get every visit to a URL.";
     app.setBugsink("", "BUGSINK_DSN", std::string("brave-history-mcp@") + BRAVE_HISTORY_APP_VERSION);
-    app.allowCliTools = true;
 
     app.tool<SearchInput>(
         "search",

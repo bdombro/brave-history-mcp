@@ -5,14 +5,18 @@ Guidance for AI agents working in `brave-history-mcp`.
 > Keep this file in sync with code, tooling, and conventions.
 
 <!-- cpp-templates:begin -->
+<!-- cpp-templates:commit c746b02c9f5b17b63c4921e6adff7fa8c5f6dc37 -->
+## Contributing
+
+Read the sections of [docs/contributing.md](docs/contributing.md) relevant to your change before editing.
+
 ## Tooling alignment
 
-Align this repository via the `cpp-templates` skill (`just check <template> .`). Keep repository-specific rules outside `<!-- cpp-templates:begin -->` and `<!-- cpp-templates:end -->`. Do not hand-edit verbatim template files or template recipes (repositories may add extra recipes or variables).
+Align this repository via the `cpp-templates` skill, which diffs `base/` and `templates/<template>/` since the `<!-- cpp-templates:commit <sha> -->` marker above and adapts changes while preserving repository customizations. Keep repository-specific rules outside `<!-- cpp-templates:begin -->` and `<!-- cpp-templates:end -->`.
 
 ## Edit-don't-rewrite
 
 - Make targeted edits and move files with `git mv`; never regenerate files from scratch or retype them from memory.
-- Template files arrive through `just new` or `just sync`.
 - Never delete, skip, or loosen tests to pass; if a test must change, explain why in the commit message.
 
 ## C++ Memory Safety
@@ -43,34 +47,30 @@ Iterate with `just test "<case>"` (Debug build with ASan + UBSan, `BUGSINK_DSN="
 
 ## Recipes
 
-- Core: `build`, `clean`, `configure`, `deps`, `doctor`, `fmt`, `lint`, `release`, `test [filter]`, `upgrade-deps`
+- Core: `build`, `clean`, `configure`, `deps`, `doctor`, `fmt`, `lint`, `test [filter]`, `upgrade-deps`
 - `homebrew-*`: `install`, `uninstall`
 - `homebrew-service` and `homebrew-mcp`: `daemon-logs`, `daemon-restart`, `daemon-start`, `daemon-status`, `daemon-stop`
 - `homebrew-mcp`: `test-mcp`
-- Dropped tooling (do not re-add): foreground runner, local tap/overlay symlinking, GitHub-branch/local-publish/dry-run helpers, standalone formula check, and JS formula helpers
+- Dropped tooling (do not re-add): foreground runner, local tap/overlay symlinking, GitHub-branch/local-publish/dry-run helpers, standalone formula check, `release` recipe, and JS formula helpers
 
 ## Changelog
 
-Add one line under `## Unreleased` in `CHANGELOG.md` for every change (use `Internal: ...` for internal changes).
+PRs touch no release files (`CHANGELOG.md`, `VERSION`, `versions/`). Write the PR title (and optional body) as the changelog entry; `release.yml` generates `CHANGELOG.md` from squash-merge commits after merge.
 
 ## Paths, env vars, and README
 
 - `<name>` in Homebrew paths is always the formula name, never a short XDG name: app data lives in `$(brew --prefix)/var/<name>`, config in `$(brew --prefix)/etc/<name>/`, and service secrets in `$(brew --prefix)/etc/<name>/env` (`chmod 600`, never in the public formula).
 - Secrets are env vars only.
-- Every `README.md` is end-user first: what it does, install, usage, env var table (name, required or optional, purpose), then links into `docs/` (`docs/development.md`, `docs/architecture.md`) for contributor workflow and architecture.
-
-## Remote tests
-
-Never run `test.yml` manually before `just release` (because `release` runs `test.yml` first). Run `test.yml` manually only when asked or to reproduce a Linux-only failure.
+- Every `README.md` is end-user first: what it does, install, usage, env var table (name, required or optional, purpose), then links into `docs/` (`docs/contributing.md`, `docs/architecture.md`) for contributor workflow and architecture.
 <!-- cpp-templates:end -->
 
 ## Architecture
 
-- Standalone C++26 MCP server and CLI built on `slimr-mcp[http]` and `slimr-sqlite` (plus `slimr-test` for tests).
+- Standalone C++26 MCP server built on `slimr-mcp[http]` and `slimr-sqlite` (plus `slimr-test` for tests).
 - `src/app.hpp` defines `make_brave_history_app()` returning `slimr::PluginApp` with `search`, `list`, `visits`, and `status` tools.
-- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(...)` on port `10003` and dispatches `app.run(argc, argv)`.
+- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(...)` on port `10003` and dispatches `app.run(argc, argv)` (server-only CLI: `http`/`serve`, `--help`, `--version`, `--skip-checks`, `--log-file`).
 - `src/snapshot.hpp`, `src/db.hpp`, and `src/time.hpp` implement atomic `flock` SQLite snapshotting and thread-safe snapshot/env access (`cache_mutex()`, `env_mutex()`, `withCachedHistoryDb()`).
-- `tests/test_main.cpp` and `tests/fixture.hpp` run unit, MCP `2026-07-28`, Streamable HTTP, CLI, and concurrent reader tests against synthetic Brave SQLite fixtures.
+- `tests/test_main.cpp` and `tests/fixture.hpp` run unit, MCP `2026-07-28`, Streamable HTTP (`/mcp` and `/tools/*`), server-only CLI, and concurrent reader tests against synthetic Brave SQLite fixtures.
 
 ## Packaging & Distribution
 

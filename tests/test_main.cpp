@@ -574,6 +574,56 @@ struct HttpResponse {
     std::string body;
 };
 
+HttpResponse http_request(uint16_t port, std::string_view method, std::string_view path, std::string_view body = "") {
+    TcpFd sock(::socket(AF_INET, SOCK_STREAM, 0));
+    if (sock.fd < 0)
+        return {};
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1)
+        return {};
+    if (::connect(sock.fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0)
+        return {};
+
+    std::ostringstream os;
+    os << method << " " << path << " HTTP/1.1\r\n"
+       << "Host: 127.0.0.1:" << port << "\r\n"
+       << "Connection: close\r\n";
+    if (!body.empty() || method == "POST") {
+        os << "Content-Type: application/json\r\n"
+           << "Content-Length: " << body.size() << "\r\n";
+    }
+    os << "\r\n"
+       << body;
+    const std::string rawReq = os.str();
+
+    size_t sent = 0;
+    while (sent < rawReq.size()) {
+        const ssize_t n = ::send(sock.fd, rawReq.data() + sent, rawReq.size() - sent, 0);
+        if (n <= 0)
+            return {};
+        sent += static_cast<size_t>(n);
+    }
+
+    std::string rawResp;
+    char buf[4096]{};
+    for (;;) {
+        const ssize_t n = ::recv(sock.fd, buf, sizeof(buf), 0);
+        if (n <= 0)
+            break;
+        rawResp.append(buf, static_cast<size_t>(n));
+    }
+    const auto hdrEnd = rawResp.find("\r\n\r\n");
+    if (hdrEnd == std::string::npos)
+        return {};
+    const std::string hdrs = rawResp.substr(0, hdrEnd);
+    const auto sp1 = hdrs.find(' ');
+    const int status = sp1 == std::string::npos ? 0 : static_cast<int>(std::strtol(hdrs.c_str() + sp1 + 1, nullptr, 10));
+    return {status, rawResp.substr(hdrEnd + 4)};
+}
+
 HttpResponse http_post_mcp(uint16_t port, std::string_view method, std::string_view mcpName, const slimr::Json &req) {
     TcpFd sock(::socket(AF_INET, SOCK_STREAM, 0));
     if (sock.fd < 0)
@@ -771,25 +821,34 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
         CHECK(listResp["result"]["tools"].get<slimr::Json::array_t>().size() == 4);
     }
 
-    TEST_CASE("CLI behavior") {
-        auto fixture = createFixture({
-            {"Default", {
-                            {.url = "https://example.com/status-check", .title = "Status Page", .visits = {{.at = "2026-03-01T10:00:00Z"}}},
-                        }},
-        });
+    TEST_CASE("server-only CLI rejects tool names and removed flags") {
         auto app = make_brave_history_app();
+        slimr::enable_http(app, slimr::HttpServerOptions{.port = 10003});
+
+        auto run_quiet = [&](std::vector<char *> argv) {
+            std::stringstream out;
+            std::stringstream err;
+            auto *oldOut = std::cout.rdbuf(out.rdbuf());
+            auto *oldErr = std::cerr.rdbuf(err.rdbuf());
+            const int rc = app.run(static_cast<int>(argv.size()), argv.data());
+            std::cout.rdbuf(oldOut);
+            std::cerr.rdbuf(oldErr);
+            return rc;
+        };
 
         char a0[] = "brave-history-mcp";
         char s1[] = "status";
-        char *statusArgv[] = {a0, s1, nullptr};
-        std::stringstream ss;
-        auto *oldOut = std::cout.rdbuf(ss.rdbuf());
-        const int rc = app.run(2, statusArgv);
-        std::cout.rdbuf(oldOut);
-        CHECK(rc == 0);
-        auto parsedStatus = slimr::parse_json<slimr::Json>(ss.str());
-        REQUIRE(parsedStatus.has_value());
-        CHECK((*parsedStatus)["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
+        CHECK(run_quiet({a0, s1}) != 0);
+
+        char o1[] = "--openapi";
+        CHECK(run_quiet({a0, o1}) != 0);
+
+        char h1[] = "http";
+        char t1[] = "--tools";
+        CHECK(run_quiet({a0, h1, t1}) != 0);
+
+        char v1[] = "--version";
+        CHECK(run_quiet({a0, v1}) == 0);
     }
 
     TEST_CASE("ephemeral Streamable HTTP server serves discovery, tools and concurrent reads") {
@@ -891,6 +950,34 @@ TEST_SUITE("mcp 2026-07-28, http and concurrency") {
             REQUIRE(stj.has_value());
             CHECK((*stj)["result"]["isError"].get<bool>() == false);
             CHECK((*stj)["result"]["structuredContent"]["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
+        }
+
+        // 4b. /tools/* HTTP surface enabled by default, root tool/openapi/schema routes 404
+        {
+            CHECK(http_request(port, "GET", "/openapi.json").status == 404);
+            CHECK(http_request(port, "GET", "/schema").status == 404);
+            CHECK(http_request(port, "POST", "/status", "{}").status == 404);
+
+            const auto oa = http_request(port, "GET", "/tools/openapi.json");
+            CHECK(oa.status == 200);
+            auto oaj = slimr::parse_json<slimr::Json>(oa.body);
+            REQUIRE(oaj.has_value());
+            CHECK((*oaj)["paths"].contains("/tools/status"));
+            CHECK((*oaj)["paths"]["/tools/status"].contains("post"));
+
+            CHECK(http_request(port, "GET", "/tools/schema").status == 200);
+
+            const auto ts = http_request(port, "POST", "/tools/status", "{}");
+            CHECK(ts.status == 200);
+            auto tsj = slimr::parse_json<slimr::Json>(ts.body);
+            REQUIRE(tsj.has_value());
+            CHECK((*tsj)["version"].get<std::string>() == BRAVE_HISTORY_APP_VERSION);
+
+            const auto tsearch = http_request(port, "POST", "/tools/search", R"({"words":["standing"]})");
+            CHECK(tsearch.status == 200);
+            auto tsearchj = slimr::parse_json<slimr::Json>(tsearch.body);
+            REQUIRE(tsearchj.has_value());
+            CHECK((*tsearchj)["pages"].get<slimr::Json::array_t>().size() == 1);
         }
 
         // 5. Concurrent HTTP callers across threads
