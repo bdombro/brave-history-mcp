@@ -23,10 +23,24 @@ just test-mcp
 
 ## Transports & MCP `2026-07-28`
 
-- **Streamable HTTP**: `brave-history-mcp http` (default `0.0.0.0:10003`, override with `--host` / `--port`)
+- **Streamable HTTP**: `brave-history-mcp http` (default `127.0.0.1:10003`, override with `--host` / `--port`; pass `--host 0.0.0.0` to expose)
 - **Direct CLI**: `brave-history-mcp <tool> ['{"arg":"val"}']` (defaults to `{}`)
 
 This server targets **MCP protocol version `2026-07-28`** (`server/discover` instead of legacy `initialize`).
+
+## Develop against an unreleased lib
+
+Add `"overlay-ports"` to the consumer's `vcpkg-configuration.json`, then run `just test` or `just build` as usual (add one entry per unreleased lib):
+
+```json
+{
+  "overlay-ports": [
+    "<relative path to ~/dev/slimr/<name>/ports/slimr-<name>>"
+  ]
+}
+```
+
+Remove `"overlay-ports"` and bump the registry baseline once the lib is released. Never commit or release with `overlay-ports` set.
 
 ## Release
 

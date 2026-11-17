@@ -22,7 +22,7 @@ brew services start brave-history-mcp
 brew services info brave-history-mcp
 ```
 
-The HTTP server binds `0.0.0.0:10003` (`http://127.0.0.1:10003/mcp` locally), stores snapshot caches under `$(brew --prefix)/var/brave-history-mcp`, logs to `$(brew --prefix)/var/log/brave-history-mcp.log`, and loads optional service environment variables from `$(brew --prefix)/etc/brave-history-mcp/env` (`chmod 600`).
+The HTTP server binds `127.0.0.1:10003` by default (pass `--host 0.0.0.0` to expose; `http://127.0.0.1:10003/mcp` locally), stores snapshot caches under `$(brew --prefix)/var/brave-history-mcp`, logs to `$(brew --prefix)/var/log/brave-history-mcp.log`, and loads optional service environment variables from `$(brew --prefix)/etc/brave-history-mcp/env` (`chmod 600`).
 
 Add to `.mcp.json` or OpenCode `opencode.jsonc`:
 
