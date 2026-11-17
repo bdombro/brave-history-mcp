@@ -175,6 +175,6 @@ Run the direct binary on a separate dev port:
 ### Transports & MCP `2026-07-28`
 
 - **Streamable HTTP**: `brave-history-mcp http` (default `127.0.0.1:10003`, override with `--host` / `--port`; pass `--host 0.0.0.0` to expose)
-- **Direct CLI**: `brave-history-mcp <tool> ['{"arg":"val"}']` (defaults to `{}`)
+- **HTTP tools**: `curl -sS -X POST http://127.0.0.1:10003/tools/<tool> -d '{}'` (enabled by default; OpenAPI at `GET /tools/openapi.json`)
 
 This server targets **MCP protocol version `2026-07-28`** (`server/discover` instead of legacy `initialize`).

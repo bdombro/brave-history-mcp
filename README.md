@@ -37,13 +37,13 @@ Add to `.mcp.json` or OpenCode `opencode.jsonc`:
 }
 ```
 
-Or run via direct CLI:
+Or call tools directly over HTTP (enabled by default on `/tools/<name>`):
 
 ```bash
-brave-history-mcp status
-brave-history-mcp search '{"words":["kodiaq","service"]}'
-brave-history-mcp list '{"limit":10}'
-brave-history-mcp visits '{"url":"https://example.com/page"}'
+curl -sS -X POST http://127.0.0.1:10003/tools/status -d '{}'
+curl -sS -X POST http://127.0.0.1:10003/tools/search -d '{"words":["kodiaq","service"]}'
+curl -sS -X POST http://127.0.0.1:10003/tools/list -d '{"limit":10}'
+curl -sS -X POST http://127.0.0.1:10003/tools/visits -d '{"url":"https://example.com/page"}'
 ```
 
 Query strings and URL fragments are stripped by default unless `fullUrls: true` is passed.

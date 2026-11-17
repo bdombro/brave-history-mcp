@@ -66,11 +66,11 @@ PRs touch no release files (`CHANGELOG.md`, `VERSION`, `versions/`). Write the P
 
 ## Architecture
 
-- Standalone C++26 MCP server and CLI built on `slimr-mcp[http]` and `slimr-sqlite` (plus `slimr-test` for tests).
+- Standalone C++26 MCP server built on `slimr-mcp[http]` and `slimr-sqlite` (plus `slimr-test` for tests).
 - `src/app.hpp` defines `make_brave_history_app()` returning `slimr::PluginApp` with `search`, `list`, `visits`, and `status` tools.
-- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(...)` on port `10003` and dispatches `app.run(argc, argv)`.
+- `src/main.cpp` registers Streamable HTTP via `slimr::enable_http(...)` on port `10003` and dispatches `app.run(argc, argv)` (server-only CLI: `http`/`serve`, `--help`, `--version`, `--skip-checks`, `--log-file`).
 - `src/snapshot.hpp`, `src/db.hpp`, and `src/time.hpp` implement atomic `flock` SQLite snapshotting and thread-safe snapshot/env access (`cache_mutex()`, `env_mutex()`, `withCachedHistoryDb()`).
-- `tests/test_main.cpp` and `tests/fixture.hpp` run unit, MCP `2026-07-28`, Streamable HTTP, CLI, and concurrent reader tests against synthetic Brave SQLite fixtures.
+- `tests/test_main.cpp` and `tests/fixture.hpp` run unit, MCP `2026-07-28`, Streamable HTTP (`/mcp` and `/tools/*`), server-only CLI, and concurrent reader tests against synthetic Brave SQLite fixtures.
 
 ## Packaging & Distribution
 
