@@ -1,11 +1,11 @@
 class BraveHistoryMcp < Formula
   desc "Search Brave browser history (titles, URLs, visits) over MCP"
   homepage "https://github.com/bdombro/brave-history-mcp"
-  version "2.2.0"
+  version "2.2.1"
 
   on_macos do
-    url "https://github.com/bdombro/brave-history-mcp/releases/download/v2.2.0/brave-history-mcp-arm64-macos.tar.gz"
-    sha256 "e3aa8bf25419bf88fe0db2fda6be8741de7724acc37d5cc91f2478d34d7f7599"
+    url "https://github.com/bdombro/brave-history-mcp/releases/download/v2.2.1/brave-history-mcp-arm64-macos.tar.gz"
+    sha256 "03166aab733dad0ca6d9afea55ae6ef061267f5a007460df71c2e386f8c307dc"
   end
 
   def install
