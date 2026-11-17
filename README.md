@@ -68,4 +68,4 @@ For the background service, put overrides in `$(brew --prefix)/etc/brave-history
 
 ## Development
 
-See [docs/development.md](docs/development.md) for local builds, testing, and releases.
+See [docs/contributing.md](docs/contributing.md) for local builds, testing, and contributing.
